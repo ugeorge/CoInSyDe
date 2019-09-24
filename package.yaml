@@ -21,12 +21,17 @@ description:         Please see the README on GitHub at <https://github.com/gith
 
 dependencies:
 - base >= 4.7 && < 5
+- xml
+- text
+- containers
+- parsec
+- prettyprinter
 
 library:
   source-dirs: src
-
+  
 executables:
-  coinsyde-exe:
+  f2c-exe:
     main:                Main.hs
     source-dirs:         app
     ghc-options:
@@ -37,7 +42,7 @@ executables:
     - coinsyde
 
 tests:
-  coinsyde-test:
+  f2c-test:
     main:                Spec.hs
     source-dirs:         test
     ghc-options:
