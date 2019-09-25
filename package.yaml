@@ -26,20 +26,23 @@ dependencies:
 - containers
 - parsec
 - prettyprinter
+- filepath
 
 library:
   source-dirs: src
   
 executables:
-  f2c-exe:
-    main:                Main.hs
+  f2c:
+    main:                F2C.hs
     source-dirs:         app
     ghc-options:
+    - -main-is           F2C
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
     - coinsyde
+    - pretty-simple >= 3
 
 tests:
   f2c-test:

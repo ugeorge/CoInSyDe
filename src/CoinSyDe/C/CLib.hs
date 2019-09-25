@@ -26,6 +26,6 @@ tyLib = fromList
 patLib :: Map FunId [TTm]
 patLib = fromList 
   [ ("comb",  [FunTTm "func"])
-  , ("moore", [FunTTm "ns_func", CodeTTm "\n", FunTTm "od_func"])
-  , ("mealy", [FunTTm "ns_func", CodeTTm "\n", FunTTm "od_func"])
+  , ("moore", [FunTTm "ns_func", FunTTm "od_func"])
+  , ("mealy", [FunTTm "ns_func", FunTTm "od_func"])
   ]

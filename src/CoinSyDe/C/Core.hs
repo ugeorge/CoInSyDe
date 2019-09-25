@@ -37,6 +37,21 @@ data Ty = PrimTy  {tyName :: TypeId}
 -- identifier for the "port" kinds.
 data PortTy = Input | Output | State | Variable deriving (Show,Eq)
 
+isInput Input       = True
+isInput _           = False
+isOutput Output     = True
+isOutput _          = False
+isState State       = True
+isState _           = False
+isVariable Variable = True
+isVariable _        = False
+mkPortTy "in"         = Input
+mkPortTy "out"        = Output
+mkPortTy "state"      = State
+mkPortTy "var"        = Variable
+mkPortTy str          = error $ "Port type '" ++ str ++ "' is not recognized." 
+
+
 -- container for variable
 data Var = Var { varName :: VarId
                , varPort :: PortTy
@@ -45,15 +60,22 @@ data Var = Var { varName :: VarId
                } deriving (Show, Eq)
 
 -- container for functions
-data Fun = Fun { funName   :: FunId
-               , inline    :: Bool
-               , ports     :: Map Name Var
-               , bindings  :: Map Name (FunId, Map Name Var)
-               , funTempl  :: [TTm]
-               } deriving (Show)
+data Fun = TmFun { funName   :: FunId
+                 , inline    :: Bool
+                 , ports     :: Map Name Var
+                 , bindings  :: Map Name (FunId, Map Name Var)
+                 , funTempl  :: [TTm]
+                 }
+         | CFun  { funName   :: FunId
+                 , ports     :: Map Name Var
+                 , file      :: FilePath
+                 } deriving (Show)
+isInline (TmFun _ i _ _ _) = i
+isInline CFun{} = False
+
 
 -- abstract terms to represent template "code" 
 data TTm = CodeTTm String
-         | VarTTm  String
+         | VarTTm  [String]
          | FunTTm  String
          deriving (Show)
