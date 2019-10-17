@@ -1,6 +1,6 @@
 ----------------------------------------------------------------------
 -- |
--- Module      :  CoinSyDe.C.Core
+-- Module      :  CoInSyDe.TTmParse
 -- Copyright   :  (c) George Ungureanu, 2019
 -- License     :  BSD-style (see the file LICENSE)
 -- 

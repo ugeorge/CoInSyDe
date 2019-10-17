@@ -2,7 +2,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 ----------------------------------------------------------------------
 -- |
--- Module      :  CoinSyDe.Core
+-- Module      :  CoInSyDe.Core
 -- Copyright   :  (c) George Ungureanu, 2019
 -- License     :  BSD-style (see the file LICENSE)
 -- 
@@ -22,6 +22,13 @@ type Id      = Text -- ^ Generic identifier used as library search key
 type Name    = Text -- ^ Generic (e.g. variable) name, read from the user input
 type Keyword = Text -- ^ A "reserved" keyword used in template identifiers, see 'TTm'
 
+-- | Short alias for a port mapping
+type PortMap = Map Name Port
+
+-- | Short alias for a dictionary
+type Dict t = Map Id t
+
+
 -- | Generic class for types. Each language family needs to instantiate this class
 -- with native type representations.
 class Ty t where
@@ -37,9 +44,6 @@ class Glue p where
 data Port where
     Port :: (Glue p, Show p, Eq p) => {pName :: Id, pGlue :: p} -> Port
 deriving instance Show Port
-
--- | Short alias for a port mapping
-type PortMap = Map Name Port
 
 -- | Container for functionals
 data Fun where
