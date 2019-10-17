@@ -31,26 +31,26 @@ dependencies:
 library:
   source-dirs: src
   
-executables:
-  f2c:
-    main:                F2C.hs
-    source-dirs:         app
-    ghc-options:
-    - -main-is           F2C
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    dependencies:
-    - coinsyde
-    - pretty-simple >= 3
+# executables:
+#   f2c:
+#     main:                F2C.hs
+#     source-dirs:         app
+#     ghc-options:
+#     - -main-is           F2C
+#     - -threaded
+#     - -rtsopts
+#     - -with-rtsopts=-N
+#     dependencies:
+#     - coinsyde
+#     - pretty-simple >= 3
 
-tests:
-  f2c-test:
-    main:                Spec.hs
-    source-dirs:         test
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    dependencies:
-    - coinsyde
+# tests:
+#   f2c-test:
+#     main:                Spec.hs
+#     source-dirs:         test
+#     ghc-options:
+#     - -threaded
+#     - -rtsopts
+#     - -with-rtsopts=-N
+#     dependencies:
+#     - coinsyde
