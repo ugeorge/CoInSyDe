@@ -14,10 +14,13 @@
 module CoInSyDe.Frontend where
 
 import Data.Text (Text,pack)
+import Data.ByteString (ByteString)
 
 -- | This is a minimal implementation for a tree-like object parser. The only type
 -- needed to be wrapped is the node element specific to the frontend representation.
 class FNode f where
+  -- | Returns the root node from a document file. 'FilePath' passed for error message only.
+  readDoc  :: FilePath -> ByteString -> f
   -- | Returns a list with all the child nodes with a certain name
   children :: String  -> f -> [f]
   -- | Returns either the value of a certain attribute or a specific error message.
@@ -54,3 +57,7 @@ hasValue attr val node = case getAttr attr node of
 filterByAttr :: FNode f => String -> String -> [f] -> [f]
 filterByAttr attr val = filter (attr `hasValue` val)
 
+-- | @allAttrOf el attr root@ returns a list with all values for attrigute @attr@
+-- belonging to all children named @el@. Unsafe, assumes attributes exists already.
+allAttrOf :: FNode f => String -> String -> f -> [Text]
+allAttrOf el attr = map (@!=attr) . children el

@@ -43,8 +43,8 @@ parseExpr :: Parser TTm
 parseExpr = portTm <|> funTm <|> try codeTm
 
 codeTm :: Parser TTm
-codeTm = (TCode . strip . pack) <$>
-         manyTill anyChar (careful "(|" <|> careful "[|" <|> (eof >> string ""))
+codeTm = let eoc = careful "(|" <|> careful "[|" <|> (eof >> string "")
+         in  (TCode . strip . pack) <$> anyChar `manyTill` eoc
 
 portTm :: Parser TTm
 portTm = mkQuery TPort <$> between (symbol "(|") (symbol "|)") identity
@@ -57,13 +57,9 @@ mkQuery c tx = let l = split (=='.') (pack tx)
 
 --------------------------------------------------
 
--- isSpace' '\n' = False
--- isSpace' c    = isSpace c
+whiteSpace = skipMany (skipMany1 (satisfy isSpace) <?> "")
 
 lexeme p = do{ x <- p; whiteSpace; return x  }
-whiteSpace  = skipMany (simpleSpace <?> "")
-simpleSpace = skipMany1 (satisfy isSpace)
-
-symbol name = lexeme $ string name
-identity    = lexeme $ many1 $ alphaNum <|> oneOf "_'."
-careful     = try . lookAhead . string
+symbol   = lexeme . string
+careful  = try . lookAhead . string
+identity = lexeme $ many1 $ alphaNum <|> oneOf "_'."

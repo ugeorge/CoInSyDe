@@ -21,6 +21,7 @@ import Data.Map.Lazy as M
 type Id      = Text -- ^ Generic identifier used as library search key
 type Name    = Text -- ^ Generic (e.g. variable) name, read from the user input
 type Keyword = Text -- ^ A "reserved" keyword used in template identifiers, see 'TTm'
+type Target  = String -- ^ An identifier for target language
 
 -- | Short alias for a port mapping
 type PortMap = Map Name Port

@@ -27,6 +27,8 @@ dependencies:
 - parsec
 - prettyprinter
 - filepath
+- bytestring >= 0.10
+- directory >= 1.2
 
 library:
   source-dirs: src
