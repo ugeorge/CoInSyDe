@@ -1,5 +1,4 @@
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE StandaloneDeriving #-}
 ----------------------------------------------------------------------
 -- |
 -- Module      :  CoInSyDe.Core
@@ -17,54 +16,58 @@ module CoInSyDe.Core where
 import Data.Text (Text)
 import Data.Map.Lazy as M
 
+import CoInSyDe.Frontend (FNode)
+
 -- some aliases
 type Id      = Text -- ^ Generic identifier used as library search key
 type Name    = Text -- ^ Generic (e.g. variable) name, read from the user input
 type Keyword = Text -- ^ A "reserved" keyword used in template identifiers, see 'TTm'
 type Target  = String -- ^ An identifier for target language
 
--- | Short alias for a port mapping
-type PortMap = Map Name Port
+type PortMap l = Map Name (Port l) -- ^ Alias for a port dictionary
+type FunMap l  = Map Id (Fun l)    -- ^ Alias for a template dictionary
+type Dict t    = Map Id t          -- ^ Alias for a generic dictionary
 
--- | Short alias for a dictionary
-type Dict t = Map Id t
+class Target l where
+  type Type l
+  type Glue l
+  mkType :: FNode f => l -> Id -> f -> Type l
+  mkGlue :: FNode f => l -> Id -> Dict t -> f -> Glue l
 
+-- -- | Generic class for types. Each language family needs to instantiate this class
+-- -- with native type representations.
+-- class Ty t where
+--   tyName :: t -> Id
 
--- | Generic class for types. Each language family needs to instantiate this class
--- with native type representations.
-class Ty t where
-  tyName :: t -> Id
-
--- | Generic class for port kinds. Each language needs to instantiate this class with
--- different port identifiers pointing to specific, relevant glue operators.
-class Glue p where
-  glName :: p -> Id
-  glTy   :: Ty t => p -> t
+-- -- | Generic class for port kinds. Each language needs to instantiate this class with
+-- -- different port identifiers pointing to specific, relevant glue operators.
+-- class Glue p where
+--   mkGlue :: (FNode f, Ty t) => Id -> Dict t -> f -> p
 
 -- | Port container pointing to some kind of glue mechanism (e.g. variables)
-data Port where
-    Port :: (Glue p, Show p, Eq p) => {pName :: Id, pGlue :: p} -> Port
-deriving instance Show Port
+data Port l where
+    Port :: Target l => {pName :: Id, pGlue :: Glue l} -> Port l
 
 -- | Container for functionals
-data Fun where
+data Fun l where
   -- | Template functional. Contains template code managed by CoInSyDe
-  TmFun :: { funName   :: Id        -- ^ unique function ID
+  TmFun :: Target l =>
+           { funName   :: Id        -- ^ unique function ID
            , inline    :: Bool
                        -- ^ True if template expanded inline. False is wrapped
                        --   according to language syntax (e.g. function call)
-           , ports     :: PortMap   -- ^ maps user port names to glue containers
-           , bindings  :: Map Name (Id, PortMap)
+           , ports     :: PortMap l -- ^ maps user port names to glue containers
+           , bindings  :: Map Name (Id, PortMap l)
                        -- ^ maps a template functional identifier 'TFun' to an
                        --   existing (parsed) functional 'Fun', along with its new
                        --   port bindings
            , funTempl  :: [TTm]     -- ^ list of template terms
            } -> Fun
   -- | Native functional. Code used \"as-is\", no manipulation done.
-  NvFun :: { funName   :: Id        -- ^ unique function ID
-           , include   :: Bool      -- ^ True if external include
-           , ports     :: PortMap   -- ^ maps user port names to glue containers
-           , funCode   :: (FilePath, Text) -- ^ points to/contains native code
+  NvFun :: Target l =>
+           { funName   :: Id        -- ^ unique function ID
+           , ports     :: PortMap l -- ^ maps user port names to glue containers
+           , funCode   :: Either FilePath Text -- ^ points to/contains native code
            } -> Fun
 deriving instance Show Fun
 

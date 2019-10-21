@@ -25,6 +25,8 @@ class FNode f where
   children :: String  -> f -> [f]
   -- | Returns either the value of a certain attribute or a specific error message.
   getAttr  :: String -> f -> Either Text String
+  -- | Gets the text content from a node.
+  txtContent :: f -> Text
 
 -- | Infix operator for 'children'.
 (|=) :: FNode f => f -> String -> [f]

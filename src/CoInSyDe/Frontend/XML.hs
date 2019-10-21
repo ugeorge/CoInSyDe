@@ -19,10 +19,11 @@ import Text.XML.Light
 
 -- | XML 'Element' type from "Text.XML.Light".
 instance FNode Element where
+  txtContent     = pack . strContent
+  children str   = findChildren (qn str)
   readDoc path d = case parseXMLDoc d of
                      Nothing -> error $ "XML file '" ++ path ++ "' is empty!"
                      Just r  -> r
-  children str   = findChildren (qn str)
   getAttr attr n =
     case findAttr (qn attr) n of
       Just a -> Left $ pack a
