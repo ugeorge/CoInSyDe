@@ -59,7 +59,7 @@ hasValue attr val node = case getAttr attr node of
 filterByAttr :: FNode f => String -> String -> [f] -> [f]
 filterByAttr attr val = filter (attr `hasValue` val)
 
--- | @allAttrOf el attr root@ returns a list with all values for attrigute @attr@
--- belonging to all children named @el@. Unsafe, assumes attributes exists already.
-allAttrOf :: FNode f => String -> String -> f -> [Text]
-allAttrOf el attr = map (@!=attr) . children el
+-- -- | @allAttrOf el attr root@ returns a list with all values for attrigute @attr@
+-- -- belonging to all children named @el@. Unsafe, assumes attributes exists already.
+-- allAttrOf :: FNode f => String -> String -> f -> [Text]
+-- allAttrOf el attr = map (@!=attr) . children el

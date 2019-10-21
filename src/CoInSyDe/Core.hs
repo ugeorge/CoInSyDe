@@ -1,4 +1,6 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE StandaloneDeriving, DeriveAnyClass #-}
+{-# LANGUAGE TypeFamilies, FlexibleContexts #-}
 ----------------------------------------------------------------------
 -- |
 -- Module      :  CoInSyDe.Core
@@ -15,6 +17,7 @@ module CoInSyDe.Core where
 
 import Data.Text (Text)
 import Data.Map.Lazy as M
+import Data.Binary
 
 import CoInSyDe.Frontend (FNode)
 
@@ -22,31 +25,28 @@ import CoInSyDe.Frontend (FNode)
 type Id      = Text -- ^ Generic identifier used as library search key
 type Name    = Text -- ^ Generic (e.g. variable) name, read from the user input
 type Keyword = Text -- ^ A "reserved" keyword used in template identifiers, see 'TTm'
-type Target  = String -- ^ An identifier for target language
 
 type PortMap l = Map Name (Port l) -- ^ Alias for a port dictionary
-type FunMap l  = Map Id (Fun l)    -- ^ Alias for a template dictionary
 type Dict t    = Map Id t          -- ^ Alias for a generic dictionary
 
-class Target l where
-  type Type l
-  type Glue l
-  mkType :: FNode f => l -> Id -> f -> Type l
-  mkGlue :: FNode f => l -> Id -> Dict t -> f -> Glue l
-
--- -- | Generic class for types. Each language family needs to instantiate this class
--- -- with native type representations.
--- class Ty t where
---   tyName :: t -> Id
-
--- -- | Generic class for port kinds. Each language needs to instantiate this class with
--- -- different port identifiers pointing to specific, relevant glue operators.
--- class Glue p where
---   mkGlue :: (FNode f, Ty t) => Id -> Dict t -> f -> p
+-- | Class for providing a common API for different target languages, where @l@ is
+-- mainly a proxy type.
+class ( Show (Glue l), Read (Glue l)
+      , Show (Type l), Read (Type l)) => Target l where
+  -- | A set of data type definitions, relevant to the target language.
+  data Type l :: * 
+  -- | A set of glue operation definitions, relevant to the target language.
+  data Glue l :: *
+  -- | Constructor for data types used in common methods
+  mkType :: FNode f => Id -> f -> Type l
+  -- | Constructor for glue operations used in common methods. 
+  mkGlue :: FNode f => Id -> Dict (Type l) -> f -> Glue l
 
 -- | Port container pointing to some kind of glue mechanism (e.g. variables)
 data Port l where
     Port :: Target l => {pName :: Id, pGlue :: Glue l} -> Port l
+deriving instance Target l => Show (Port l)
+deriving instance Target l => Read (Port l)
 
 -- | Container for functionals
 data Fun l where
@@ -62,21 +62,24 @@ data Fun l where
                        --   existing (parsed) functional 'Fun', along with its new
                        --   port bindings
            , funTempl  :: [TTm]     -- ^ list of template terms
-           } -> Fun
+           } -> Fun l
   -- | Native functional. Code used \"as-is\", no manipulation done.
   NvFun :: Target l =>
            { funName   :: Id        -- ^ unique function ID
            , ports     :: PortMap l -- ^ maps user port names to glue containers
            , funCode   :: Either FilePath Text -- ^ points to/contains native code
-           } -> Fun
-deriving instance Show Fun
+           } -> Fun l
+deriving instance Target l => Show (Fun l)
+deriving instance Target l => Read (Fun l)
 
 -- | Abstract terms to represent templates. The CoInSyDe template language consists in
 -- a list (i.e. a sequence) of 'TTm' terms.
 --
--- The list of 'Keyword's following 'TPort' and 'TFun' are queries telling CoInSyDe to expand specific info. If the list is empty than the default expansion occurs.
+-- The list of 'Keyword's following 'TPort' and 'TFun' are queries telling CoInSyDe to
+-- expand specific info. If the list is empty than the default expansion occurs.
 data TTm = TCode Text            -- ^ target language code in textual format
-         | TPort Name [Keyword]  -- ^ port identifier. By default expands the port name.
-         | TFun  Name [Keyword]  -- ^ identifier for functionals. By default expands
-                                 --   the functional code.
-         deriving (Show)
+         | TPort Name [Keyword]  -- ^ placeholder for port identifier. Default expands
+                                 --   to port name.
+         | TFun  Name [Keyword]  -- ^ placeholder for functional template
+                                 --   identifier. Default expands to functional code.
+         deriving (Show,Read)
