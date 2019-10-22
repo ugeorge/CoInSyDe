@@ -38,15 +38,12 @@ class ( Show (Glue l), Read (Glue l)
   -- | A set of glue operation definitions, relevant to the target language.
   data Glue l :: *
   -- | Constructor for data types used in common methods
-  mkType :: FNode f => Id -> f -> Type l
+  mkType :: FNode f => Id -> Dict (Type l) -> f -> Type l
   -- | Constructor for glue operations used in common methods. 
   mkGlue :: FNode f => Id -> Dict (Type l) -> f -> Glue l
 
 -- | Port container pointing to some kind of glue mechanism (e.g. variables)
-data Port l where
-    Port :: Target l => {pName :: Id, pGlue :: Glue l} -> Port l
-deriving instance Target l => Show (Port l)
-deriving instance Target l => Read (Port l)
+type Port = Glue
 
 -- | Container for functionals
 data Fun l where
@@ -71,6 +68,9 @@ data Fun l where
            } -> Fun l
 deriving instance Target l => Show (Fun l)
 deriving instance Target l => Read (Fun l)
+
+isInline (TmFun _ i _ _ _) = i
+isInline NvFun{} = False
 
 -- | Abstract terms to represent templates. The CoInSyDe template language consists in
 -- a list (i.e. a sequence) of 'TTm' terms.

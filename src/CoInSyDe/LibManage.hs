@@ -39,6 +39,10 @@
 --   (e.g. @.C.ucosii@).
 --
 -- * no name duplicates are allowed for the same target within the same library.
+--
+-- Libraries are loaded based on their hierarchy on the first run, for each target,
+-- and then are dumped to a @objdump@ file. Each subsequent run will load the
+-- pre-built libraries from that @objdump@, unless forced to rebuild libraries.
 ------------------------------------------------------------------------
 module CoInSyDe.LibManage where
 
@@ -49,7 +53,8 @@ import System.FilePath.Posix
 #endif
 import System.Directory
 import Data.List
-import Data.Text (Text)
+import Data.Text (Text,pack,unpack)
+import Data.Text.Encoding (encodeUtf8,decodeUtf8)
 import qualified Data.ByteString as B
 import CoInSyDe.Frontend
 
@@ -61,6 +66,8 @@ instance Functor PathAnd where
 
 -- | Constructor function
 wrapPath p c = PathAnd (p,c)
+unwrapPath (PathAnd (_,c)) = c
+getPath (PathAnd (p,_)) = p
 
 -- | Pair-wise concatenates a list of path-wrappers into one wrapper. The resulting
 -- path will have a posix-like format, i.e. @path1:path2:path3@.
@@ -72,10 +79,10 @@ catPA pcs = let (ps, cs) = unzip $ map unPAnd pcs
 -- for the same target.
 uniqueNamesLib :: FNode f
                => String      -- ^ @\<what\>@ kind of library files are tested
-               -> [PathAnd f] -- ^ all listed files found at a library path
+               ->x [PathAnd f] -- ^ all listed files found at a library path
                -> ()
 uniqueNamesLib what = uniqueNames . catPA . (map . fmap) allNames
-  where allNames = map (@!="name") . children what
+  where allNames = map (@!"name") . children what
 
 -- | Checks that there are no name duplicates from the extracted \"names\" fields from
 -- the same library having the same target.
@@ -98,10 +105,6 @@ groupByTarget what paths =  map (\t -> filter (isOf t) paths) targets
     getTarget = splitExtensions . snd . splitExtensions . takeBaseName
     isOf trg = (==) (trg , '.' : what) . getTarget
 
--- | Returns a path-wrapped frontend root node (e.g. XML root element). 
-readLib :: FNode f => FilePath -> IO (PathAnd f)
-readLib path = B.readFile path >>= return . wrapPath path . readDoc path
-
 -- | Returns a grouped list with all files from all libraries pointed by
 -- @$COINSYDE_PATH@.
 getLibs :: String -> IO [[FilePath]]
@@ -111,4 +114,17 @@ getLibs ldLibraryPath = do
 
 ---------------------------------------------------------------------
 
+-- | Returns a path-wrapped frontend root node (e.g. XML root element). 
+readLibDoc :: FNode f => FilePath -> IO (PathAnd f)
+readLibDoc path = B.readFile path >>= return . wrapPath path . readDoc path
 
+-- | Dumps the content of a built dictionary into an @objdump@ file. TODO: dump to binary.
+dumpLibObj target what path lib = do
+  let filepath = path </> target <.> what <.> "objdump"  
+  B.writeFile filepath $ encodeUtf8 $ pack $ show lib
+
+-- | Loads the content of a dictionary from an @objdump@ file. TODO: load from binary.
+loadLibObj target what path = do
+  let filepath = path </> target <.> what <.> "objdump"
+  lib <- B.readFile filepath
+  return $ read $ unpack $ decodeUtf8 lib  

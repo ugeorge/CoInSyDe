@@ -23,12 +23,24 @@ import CoInSyDe.TTmParse
 -- | Builds a type dictionaty from all @type@ child nodes of an input, using the
 -- 'Target' API maker function.
 mkTypeDict :: (Target l, FNode f)
-           => f
+           => Dict (Type l)  -- ^ previously-built type dictionary
+           -> f
            -> Dict (Type l)
-mkTypeDict =  M.fromList . map mkType1 . children "type"
+mkTypeDict tyLib =  M.fromList . map mkType1 . children "type"
   where 
-    mkType1 n = let name = n @!= "name"
-                in  (name, mkType name n) 
+    mkType1 n = let name = n @! "name"
+                in  (name, mkType name tyLib n) 
+
+-- | Makes a dictionary of ports from a list of port nodes.
+mkPortDict :: (Target l, FNode f)
+           => Id             -- ^ parent Id
+           -> Dict (Type l)  -- ^ type dictionary
+           -> [f]            -- ^ list of @port@ nodes
+           -> PortMap l
+mkPortDict parentId typeLib = M.fromList . map mkPort
+  where
+    mkPort n = let name = n @! "name"
+               in (name, mkGlue parentId typeLib n)
 
 -- | Builds a dictionary of functionals from a frontend root node.
 mkFunDict :: (Target l, FNode f)
@@ -48,34 +60,24 @@ mkFunDict mkComposite typeLib patternLib root =
     -----------------------------------
     mkNvFun node = (name, NvFun name ports code)
       where
-        name  = node @!= "name" 
+        name  = node @! "name" 
         ports = mkPortDict name typeLib $ node |= "port"
-        code  = getCode $ node @= "fromFile"
+        code  = getCode $ node @? "fromFile"
         getCode Nothing  = Right $ txtContent node
         getCode (Just a) = Left $ unpack a
     -----------------------------------
     mkTmFun mkTempl node = (name, TmFun name inline ports binds templ)
       where
-        name   = node @!= "name"
+        name   = node @! "name"
         inline = ("call" `hasValue` "inline") node
         templ  = mkTempl name node
         ports  = mkPortDict name typeLib (node |= "port")
         binds  = mkBindings ports (node |= "instance")
     -----------------------------------       
-    mkLibTempl  name node = funTempl $ patternLib ! (node @!= "type")
+    mkLibTempl  name node = funTempl $ patternLib ! (node @! "type")
     mkTextTempl name node = textToTm (unpack name) (txtContent node)
     -----------------------------------       
 
--- | Makes a dictionary of ports from a list of port nodes.
-mkPortDict :: (Target l, FNode f)
-           => Id             -- ^ parent Id
-           -> Dict (Type l)  -- ^ type dictionary
-           -> [f]            -- ^ list of @port@ nodes
-           -> PortMap l
-mkPortDict parentId typeLib = M.fromList . map mkPort
-  where
-    mkPort n = let name = n @!= "name"
-               in (name, Port name (mkGlue parentId typeLib n))
 
 -- | Makes a bindings container. See definition of 'TmFun'.
 mkBindings :: (Target l, FNode f)
@@ -84,11 +86,11 @@ mkBindings :: (Target l, FNode f)
            -> Map Name (Id, PortMap l)
 mkBindings parentPorts = M.fromList . map mkInst
   where
-    mkInst n = let to    = n @!= "replace"
-                   from  = n @!= "with"
+    mkInst n = let to    = n @! "replace"
+                   from  = n @! "with"
                    binds = n |= "bind"
                in (to, (from, M.fromList $ map mkBind binds))
-    mkBind n = let from = n @!= "port"
-                   to   = n @!= "place"
+    mkBind n = let from = n @! "port"
+                   to   = n @! "place"
                 in (to, parentPorts ! from)
     

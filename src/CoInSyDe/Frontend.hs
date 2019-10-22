@@ -33,17 +33,17 @@ class FNode f where
 node |= name = children name node
 
 -- | Maybe-wrapped infix operator for 'getAttr'.
-(@=) :: FNode f => f -> String -> Maybe Text
-node @= attr = case getAttr attr node of
+(@?) :: FNode f => f -> String -> Maybe Text
+node @? attr = case getAttr attr node of
                  Left val -> Just val
                  Right _  -> Nothing
 
 -- | Unsafe infix operator for 'getAttr'. Throws a runtime error in case attribute not
 -- found.
-(@!=) :: FNode f => f -> String -> Text
-node @!= attr = case getAttr attr node of
-                  Left  val -> val
-                  Right msg -> error msg
+(@!) :: FNode f => f -> String -> Text
+node @! attr = case getAttr attr node of
+                 Left  val -> val
+                 Right msg -> error msg
 
 -- | Same as 'children', but looks for several node names instead of just one.
 childrenOf :: FNode f => [String] -> f -> [f]
@@ -58,6 +58,7 @@ hasValue attr val node = case getAttr attr node of
 -- | Filters a list of node based on a 'hasValue' predicate.
 filterByAttr :: FNode f => String -> String -> [f] -> [f]
 filterByAttr attr val = filter (attr `hasValue` val)
+
 
 -- -- | @allAttrOf el attr root@ returns a list with all values for attrigute @attr@
 -- -- belonging to all children named @el@. Unsafe, assumes attributes exists already.
