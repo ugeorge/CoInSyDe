@@ -23,6 +23,8 @@ class FNode f where
   readDoc  :: FilePath -> ByteString -> f
   -- | Returns a list with all the child nodes with a certain name
   children :: String  -> f -> [f]
+  -- | Get name
+  getName :: f -> String
   -- | Returns either the value of a certain attribute or a specific error message.
   getAttr  :: String -> f -> Either Text String
   -- | Gets the text content from a node.

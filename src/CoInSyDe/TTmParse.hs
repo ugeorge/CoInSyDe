@@ -8,10 +8,11 @@
 -- Stability   :  experimental
 -- Portability :  portable
 --
--- This module contains the CoInSyDe template language parser.
+-- This module contains the CoInSyDe template language and the
+-- template language parser.
 ----------------------------------------------------------------------
 module CoInSyDe.TTmParse (
-  textToTm
+  TTm(..), textToTm
   ) where
 
 import Control.Applicative hiding ((<|>),many)
@@ -21,9 +22,21 @@ import Text.Parsec
 import Text.Parsec.Char
 import Text.Parsec.Combinator
 
-import CoInSyDe.Core (TTm(..))
+-- | Abstract terms to represent templates. The CoInSyDe template language consists in
+-- a list (i.e. a sequence) of 'TTm' terms.
+--
+-- The list of 'Keyword's following 'TPort' and 'TFun' are queries telling CoInSyDe to
+-- expand specific info. If the list is empty than the default expansion occurs.
+data TTm = TCode Text            -- ^ target language code in textual format
+         | TPort Name [Keyword]  -- ^ placeholder for port identifier. Default expands
+                                 --   to port name.
+         | TFun  Name [Keyword]  -- ^ placeholder for functional template
+                                 --   identifier. Default expands to functional code.
+         deriving (Show,Read)
 
 type Parser = Parsec Text [TTm]
+type Name = Text
+type Keyword = Text
 
 -- | Parses text to a list of CoInSyDe template terms.
 textToTm name = getTempl . runParser parseText [] name

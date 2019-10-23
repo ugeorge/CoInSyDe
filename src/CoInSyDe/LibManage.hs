@@ -79,7 +79,7 @@ catPA pcs = let (ps, cs) = unzip $ map unPAnd pcs
 -- for the same target.
 uniqueNamesLib :: FNode f
                => String      -- ^ @\<what\>@ kind of library files are tested
-               ->x [PathAnd f] -- ^ all listed files found at a library path
+               -> [PathAnd f] -- ^ all listed files found at a library path
                -> ()
 uniqueNamesLib what = uniqueNames . catPA . (map . fmap) allNames
   where allNames = map (@!"name") . children what

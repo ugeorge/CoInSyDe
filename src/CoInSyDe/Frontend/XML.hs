@@ -20,6 +20,7 @@ import Text.XML.Light
 -- | XML 'Element' type from "Text.XML.Light".
 instance FNode Element where
   txtContent     = pack . strContent
+  getName        = qName . elName
   children str   = findChildren (qn str)
   readDoc path d = case parseXMLDoc d of
                      Nothing -> error $ "XML file '" ++ path ++ "' is empty!"
