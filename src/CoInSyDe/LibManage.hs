@@ -128,3 +128,5 @@ loadLibObj target what path = do
   let filepath = path </> target <.> what <.> "objdump"
   lib <- B.readFile filepath
   return $ read $ unpack $ decodeUtf8 lib  
+
+

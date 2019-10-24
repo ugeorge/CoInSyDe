@@ -17,7 +17,7 @@
 module CoInSyDe.Core where
 
 import Data.Text (Text,unpack)
-import Data.Map.Lazy as M hiding (map,fold,filter)
+import Data.Map.Lazy as M hiding (map,foldr,filter)
 
 import CoInSyDe.Frontend
 import CoInSyDe.TTmParse
@@ -52,38 +52,33 @@ class ( Show (If l),   Read (If l)
   mkRequ :: FNode f => f -> Requ l
 
 -- | Container for functional components or glue operators
-data Fun l where
+data Comp l where
   -- | Template functional. Contains template code managed by CoInSyDe
-  TmFun :: Target l =>
+  TmComp :: Target l =>
            { funName  :: Id       -- ^ unique function ID
-           , ifs      :: IfMap l  -- ^ maps user port names to if containers
+           , ifs      :: IfMap l  -- ^ maps user port names to interface containers
            , reqs     :: [Requ l] -- ^ special requirements
-           , inline   :: Bool
-                      -- ^ True if template expanded inline. False is wrapped
-                      --   according to language syntax (e.g. function call)
            , refs     :: Map Name (Instance l)
                       -- ^ maps a template functional identifier 'TFun' to an
-                      --   existing (parsed) functional 'Fun', along with its new
+                      --   existing (parsed) functional 'Comp', along with its new
                       --   port bindings
            , template :: [TTm]    -- ^ list of template terms
-           } -> Fun l
+           } -> Comp l
   -- | Native functional. Code used \"as-is\", no manipulation done.
-  NvFun :: Target l =>
+  NvComp :: Target l =>
            { funName :: Id        -- ^ unique function ID
-           , ifs     :: IfMap l   -- ^ maps user port names to if containers
+           , ifs     :: IfMap l   -- ^ maps user port names to interface containers
            , reqs    :: [Requ l]  -- ^ special requirements
            , funCode :: Either FilePath Text -- ^ points to/contains native code
-           } -> Fun l
-deriving instance Target l => Show (Fun l)
-deriving instance Target l => Read (Fun l)
-
-isInline (TmFun _ _ _ i _ _) = i
-isInline NvFun{} = False
+           } -> Comp l
+deriving instance Target l => Show (Comp l)
+deriving instance Target l => Read (Comp l)
 
 -- | Container used for storing a reference to a functional component. 
 data Instance l where
   Bind :: (Target l) =>
-          { theFun   :: Id      -- ^ functional component ID
+          { theComp  :: Id      -- ^ functional component ID
+          , inline   :: Bool    -- ^ True if expanded inline, False if abstracted away
           , bindings :: IfMap l -- ^ bindings between parent and component ports
           } -> Instance l
 deriving instance Target l => Show (Instance l)
@@ -102,33 +97,32 @@ mkFunDict :: (Target l, FNode f)
           => (Id -> f -> [TTm]) -- ^ Function for creating composite templates,
                                 --   relevant to the target language.
           -> Dict (Type l)      -- ^ Existing dictionary of types
-          -> Dict (Fun l)       -- ^ Existing (library) dictionary of templates
+          -> Dict (Comp l)      -- ^ Existing (library) dictionary of templates
           -> f                  -- ^ Root node.
-          -> Dict (Fun l)       -- ^ Dictionary of templates created from this root.
+          -> Dict (Comp l)      -- ^ Dictionary of templates created from this root.
 mkFunDict mkComposite typeLib patternLib root =
   M.fromList $ patterns ++ composites ++ natives ++ templates
   where
-    patterns   = map (mkTmFun mkLibTempl)  $ root |= "pattern"
-    composites = map (mkTmFun mkComposite) $ root |= "composite"
-    templates  = map (mkTmFun mkTextTempl) $ root |= "template"
-    natives    = map mkNvFun               $ root |= "native"
+    patterns   = map (mkTmComp mkLibTempl)  $ root |= "pattern"
+    composites = map (mkTmComp mkComposite) $ root |= "composite"
+    templates  = map (mkTmComp mkTextTempl) $ root |= "template"
+    natives    = map mkNvComp               $ root |= "native"
     -----------------------------------
-    mkNvFun node = (name, NvFun name ifs reqmnts code)
+    mkNvComp node = (name, NvComp name interfs reqmnts code)
       where
         name    = node @! "name" 
-        ifs   = mkIfDict typeLib name node
+        interfs = mkIfDict typeLib name node
         reqmnts = mkRequirements node
         code    = getCode $ node @? "fromFile"
         getCode Nothing  = Right $ txtContent node
         getCode (Just a) = Left $ unpack a
     -----------------------------------
-    mkTmFun mkTempl node = (name, TmFun name ifs reqmnts inline binds templ)
+    mkTmComp mkTempl node = (name, TmComp name interfs reqmnts binds templ)
       where
         name    = node @! "name"
-        inline  = ("call" `hasValue` "inline") node
         templ   = mkTempl name node
-        ifs     = mkIfDict typeLib name node
-        binds   = mkInstances ifs node
+        interfs = mkIfDict typeLib name node
+        binds   = mkInstances interfs node
         reqmnts = mkRequirements node
     -----------------------------------       
     mkLibTempl  name node = template $ patternLib ! (node @! "type")
@@ -136,21 +130,7 @@ mkFunDict mkComposite typeLib patternLib root =
     -----------------------------------       
 
 
--- | Builds a type dictionaty from all nodes
---
---  > <root>/type
--- 
--- Uses 'mkType' from the 'Target' API.
-mkTypeDict :: (Target l, FNode f)
-           => Dict (Type l)  -- ^ existing library of types
-           -> f              -- ^ @\<root\>@ node
-           -> Dict (Type l)  -- ^ new types defined by this @\<root\>@ node
-mkTypeDict tyLib =  M.fromList . map mkType1 . children "type"
-  where 
-    mkType1 n = let name = n @! "name"
-                in  (name, mkType name tyLib n) 
-
--- | Makes a dictionary of if operations from all the child nodes
+-- | Makes a dictionary of interfaces operations from all the child nodes
 --
 -- > <parent>/interface[@name=*]
 --
@@ -162,7 +142,7 @@ mkIfDict :: (Target l, FNode f)
            -> IfMap l
 mkIfDict typeLib parentId = M.fromList . map mkEntry . ifNodes
   where
-    ifNodes = childrenOf ["port","intern","parameter"]
+    ifNodes = childrenOf ["port","intern"]
     mkEntry n = let name = n @! "name"
                 in (name, mkIf parentId typeLib n)
 
@@ -172,26 +152,27 @@ mkIfDict typeLib parentId = M.fromList . map mkEntry . ifNodes
 --
 -- Uses 'mkBindings'.
 mkInstances :: (Target l, FNode f)
-            => IfMap l      -- ^ parent's if map
-            -> f              -- ^ @<parent>@ node
+            => IfMap l   -- ^ parent's interface dictionary
+            -> f         -- ^ @<parent>@ node
             -> Map Name (Instance l)
-mkInstances parentIf = M.fromList . map mkInst . children "instance"
+mkInstances parentIfs = M.fromList . map mkInst . children "instance"
   where
-    mkInst n = let to    = n @! "placeholder"
-                   from  = n @! "component"
-               in (to, Bind from (mkBindings parentIf n))
+    mkInst n = let to     = n @! "placeholder"
+                   from   = n @! "component"
+                   inline = ("call" `hasValue` "inline") n
+               in (to, Bind from inline (mkBindings parentIfs n))
 
--- | Makes a dicionary of if operations associated based on the name bindings
--- infereed from all the child nodes
+-- | Makes a dicionary of interfaces based on the name bindings infereed from all the
+-- child nodes
 --
 -- > instance/bind[@replace=*,@with=*]
 --
--- The new if dictionary will contain the referred component's port names but with
--- the parent component's if types.
+-- The new if dictionary will contain the referred component's interface names but
+-- with the parent component's interface types.
 mkBindings :: (Target l, FNode f)
-           => IfMap l -- ^ parent component's if dictionary
-           -> f         -- ^ @instance@ node
-           -> IfMap l -- ^ new if dictionary
+           => IfMap l -- ^ parent component's interface dictionary
+           -> f       -- ^ @instance@ node
+           -> IfMap l -- ^ new interface dictionary
 mkBindings parentIfs = M.fromList . map mkBind . children "bind"
   where
     mkBind n = let from = n @! "with"
@@ -208,6 +189,58 @@ mkRequirements :: (Target l, FNode f)
                -> [Requ l]
 mkRequirements = map mkRequ . children "requirement"
 
+---------------------------------------------------------------------
+
+-- | Returns a list with the names for only the top-level components defined by the
+-- main project file. This is needed to start the recursive library search for code
+-- generation.
+getCompProj :: FNode n => n -> [Id]
+getCompProj = map (@! "name") . childrenOf ["composite","template","pattern"]
 
 
+-- TODO: load history
 
+-- | Builds a type dictionaty from all nodes
+--
+--  > <root>/type
+-- 
+-- Replaces existing entries if their IDs match. Made to be used with the CoInSyDe
+-- library load scheme, see "CoInSyDe.LibManage". Uses 'mkType' from the 'Target' API.
+loadTypeLib :: (Target l, FNode f)
+            => Dict (Type l)  -- ^ existing library of types
+            -> f              -- ^ @\<root\>@ node
+            -> Dict (Type l)  -- ^ updated library of types
+loadTypeLib tyLib =  foldr ldRepl tyLib . children "type"
+  where
+    ldRepl n lib = let name = n @! "name"
+                   in  insert name (mkType name lib n) lib 
+
+loadTemplLib :: (Target l, FNode f)
+             => Dict (Comp l)  -- ^ existing library of components
+             -> f              -- ^ @\<root\>@ node
+             -> Dict (Comp l)  -- ^ updated library of components
+loadTemplLib compLib =  foldr ldRepl compLib . children "template"
+  where
+    ldRepl n lib = let name    = n @! "name"
+                       reqmnts = mkRequirements n
+                       templ   = textToTm (unpack name) (txtContent n)
+                   in  if name `member` lib
+                       then lib
+                       else insert name (TmComp name empty reqmnts empty templ) lib 
+
+loadNvLib :: (Target l, FNode f)
+          => Dict (Comp l)  -- ^ existing library of components
+          -> f              -- ^ @\<root\>@ node
+          -> Dict (Comp l)  -- ^ updated library of components
+loadNvLib compLib =  foldr ldRepl compLib . children "native"
+  where
+    ldRepl n lib = let name    = n @! "name"
+                       reqmnts = mkRequirements n
+                       code    = case n @? "fromFile" of
+                                   Nothing -> Right $ txtContent n
+                                   Just a  -> Left $ unpack a
+                   in  if name `member` lib
+                       then lib
+                       else insert name (NvComp name empty reqmnts code) lib 
+
+        
