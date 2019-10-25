@@ -13,7 +13,7 @@
 --
 -- The anatomy of a library file is shown below. All fields are mandatory.
 --
--- @path\/to\/library/\<name\>.\<target\>.\<what\>.xml@
+-- @path\/to\/library/\<name\>.\<target\>.\<what\>.\<ext\>@
 --
 -- * @\<name\>@ is a user-defined name.
 -- 
@@ -24,8 +24,11 @@
 -- * @\<what\>@ is a tool-convenient way to tell CoInSyDe what the library file
 --   holds. For now the only allowed identifiers are @type@ and @template@.
 --
--- CoInSyDe libraries are all pointed from the @$COINSYDE_PATH@ system variable are
--- loaded using the following convention:
+-- * @\<ext\>@ is the frontend file extension, supported by CoInSyDe. Check
+-- * "CoInSyDe.Frontend" to see the supported file types.
+--
+-- CoInSyDe libraries are all pointed from the @$COINSYDE_PATH@ system
+-- variable. Libraries are loaded using the following convention:
 --
 -- * the @$COINSYDE_PATH@ has a Posix-like format, i.e. libraries are listed as
 --   @stdlib:usrlib1:usrlib2:...@, ranked by a /earlier is older/ (e.g. stdlib) and
@@ -34,17 +37,35 @@
 -- * implementation templates from a generic or /older/ library are overwritten by
 --   templates having the same \"name\" identifier from a /newer/ library.
 --
+-- * no name duplicates are allowed for the same target within the same library.
+--
 -- * implementation templates for a more generic target (e.g. @.C@) are overwritten by
 --   templates having the same \"name\" identifier for a more specialized target
 --   (e.g. @.C.ucosii@).
 --
--- * no name duplicates are allowed for the same target within the same library.
---
 -- Libraries are loaded based on their hierarchy on the first run, for each target,
 -- and then are dumped to a @objdump@ file. Each subsequent run will load the
--- pre-built libraries from that @objdump@, unless forced to rebuild libraries.
+-- pre-built libraries from that @objdump@, unless forced to rebuild libraries. Due to
+-- load-time inter-dependencies (or the lack of them), types and components are loaded
+-- in different orders:
+--
+-- * types are loaded from the most generic to the most specialized targets,
+--   over-writing old entries with the same ID.
+--
+-- * components are loaded from the most specialized to the most generic targets. Old
+--   entries with the same ID are being kept new ones are ignored.
 ------------------------------------------------------------------------
-module CoInSyDe.LibManage where
+module CoInSyDe.LibManage (
+  PathAnd
+  -- ** Constructors/Destructors
+  , wrapPath, unwrapPath, getPath, dropPath
+  -- ** Path methods
+  , getLibs, groupByTarget 
+  -- ** Sanity Checkers
+  , uniqueNamesLib
+  -- ** Loaders/Dumpers
+  , readLibDoc, loadLibObj, dumpLibObj
+  ) where
 
 #ifdef mingw32_HOST_OS
 import System.FilePath.Windows
@@ -59,20 +80,20 @@ import qualified Data.ByteString as B
 import CoInSyDe.Frontend
 
 -- | Convenience wapper for associating any container with its origin file path.
-newtype PathAnd a = PathAnd {unPAnd :: (FilePath,a)} deriving (Show)
+newtype PathAnd a = PathAnd (FilePath,a) deriving (Show)
 
 instance Functor PathAnd where
   fmap f (PathAnd (p,a)) = PathAnd (p, f a)
 
--- | Constructor function
 wrapPath p c = PathAnd (p,c)
-unwrapPath (PathAnd (_,c)) = c
-getPath (PathAnd (p,_)) = p
+unwrapPath (PathAnd (p,c)) = (p,c)
+getPath    (PathAnd (p,_)) = p
+dropPath   (PathAnd (_,c)) = c
 
 -- | Pair-wise concatenates a list of path-wrappers into one wrapper. The resulting
 -- path will have a posix-like format, i.e. @path1:path2:path3@.
 catPA :: [PathAnd [a]] -> PathAnd [a]
-catPA pcs = let (ps, cs) = unzip $ map unPAnd pcs
+catPA pcs = let (ps, cs) = unzip $ map unwrapPath pcs
             in PathAnd (intercalate ":" ps, concat cs)
 
 -- | Checks that all files in a certain library do not contain identifier duplicates
@@ -119,14 +140,23 @@ readLibDoc :: FNode f => FilePath -> IO (PathAnd f)
 readLibDoc path = B.readFile path >>= return . wrapPath path . readDoc path
 
 -- | Dumps the content of a built dictionary into an @objdump@ file. TODO: dump to binary.
+dumpLibObj :: Show a
+           => String    -- ^ project name/filename
+           -> String    -- ^ what is being dumped
+           -> FilePath  -- ^ dump directory
+           -> a -> IO () 
 dumpLibObj target what path lib = do
   let filepath = path </> target <.> what <.> "objdump"  
   B.writeFile filepath $ encodeUtf8 $ pack $ show lib
 
 -- | Loads the content of a dictionary from an @objdump@ file. TODO: load from binary.
+loadLibObj :: Read b
+           => String    -- ^ project name/filename
+           -> String    -- ^ what is being loaded
+           -> FilePath  -- ^ load directory
+           -> IO b
 loadLibObj target what path = do
   let filepath = path </> target <.> what <.> "objdump"
   lib <- B.readFile filepath
   return $ read $ unpack $ decodeUtf8 lib  
-
 

@@ -191,56 +191,78 @@ mkRequirements = map mkRequ . children "requirement"
 
 ---------------------------------------------------------------------
 
+type LdHistory d = (Dict [FilePath], Dict d)
+
+-- | Builds a type dictionaty and load history from all nodes
+--
+--  > <root>/type[@name=*,...]
+-- 
+-- Replaces existing entries if their IDs match. Made to be used with the CoInSyDe
+-- library load scheme, see "CoInSyDe.LibManage". Uses 'mkType' from the 'Target' API.
+loadTypeLib :: (Target l, FNode f)
+            => LdHistory (Type l)  -- ^ existing library of types
+            -> FilePath            -- ^ file being loaded, for history bookkeeping
+            -> f                   -- ^ @\<root\>@ node
+            -> LdHistory (Type l)  -- ^ updated library of types
+loadTypeLib tyLibH fPath =  foldr ldRepl tyLibH . children "type"
+  where
+    ldRepl n (hist,lib)
+      = let name    = n @! "name"
+            newHist = insertWith (++) name [fPath] hist
+            newLib  = insert name (mkType name lib n) lib
+        in (newHist,newLib)
+
+-- | Builds a component dictionaty and load history from all nodes
+--
+--  > <root>/template[@name=*,...]
+-- 
+-- Replaces existing entries if their IDs match. Made to be used with the CoInSyDe
+-- library load scheme, see "CoInSyDe.LibManage". Uses 'mkRequirements'.
+loadTemplLib :: (Target l, FNode f)
+             => LdHistory (Comp l)  -- ^ existing library of components
+             -> FilePath            -- ^ file being loaded, for history bookkeeping
+             -> f                   -- ^ @\<root\>@ node
+             -> LdHistory (Comp l)  -- ^ updated library of components
+loadTemplLib compLibH fPath = foldr ldRepl compLibH . children "template"
+  where
+    ldRepl n (hist,lib)
+      = let name    = n @! "name"
+            reqmnts = mkRequirements n
+            templ   = textToTm (unpack name) (txtContent n)
+            newComp = TmComp name empty reqmnts empty templ
+            newHist = insertWith (++) name [fPath] hist
+            newLib  | name `member` lib = lib
+                    | otherwise         = insert name newComp lib
+        in (newHist,newLib)
+
+
+-- | Builds a component dictionaty and load history from all nodes
+--
+--  > <root>/template[@name=*,...]
+-- 
+-- Replaces existing entries if their IDs match. Made to be used with the CoInSyDe
+-- library load scheme, see "CoInSyDe.LibManage". Uses 'mkRequirements'.
+loadNativeLib :: (Target l, FNode f)
+              => LdHistory (Comp l)  -- ^ existing library of components
+              -> FilePath            -- ^ file being loaded, for history bookkeeping
+              -> f                   -- ^ @\<root\>@ node
+              -> LdHistory (Comp l)  -- ^ updated library of components
+loadNativeLib compLibH fPath = foldr ldRepl compLibH . children "native"
+  where
+    ldRepl n (hist,lib)
+      = let name    = n @! "name"
+            reqmnts = mkRequirements n
+            code    = case n @? "fromFile" of
+                        Nothing -> Right $ txtContent n
+                        Just a  -> Left $ unpack a
+            newComp = NvComp name empty reqmnts code
+            newHist = insertWith (++) name [fPath] hist
+            newLib  | name `member` lib = lib
+                    | otherwise         = insert name newComp lib
+        in (newHist,newLib)
+        
 -- | Returns a list with the names for only the top-level components defined by the
 -- main project file. This is needed to start the recursive library search for code
 -- generation.
 getCompProj :: FNode n => n -> [Id]
 getCompProj = map (@! "name") . childrenOf ["composite","template","pattern"]
-
-
--- TODO: load history
-
--- | Builds a type dictionaty from all nodes
---
---  > <root>/type
--- 
--- Replaces existing entries if their IDs match. Made to be used with the CoInSyDe
--- library load scheme, see "CoInSyDe.LibManage". Uses 'mkType' from the 'Target' API.
-loadTypeLib :: (Target l, FNode f)
-            => Dict (Type l)  -- ^ existing library of types
-            -> f              -- ^ @\<root\>@ node
-            -> Dict (Type l)  -- ^ updated library of types
-loadTypeLib tyLib =  foldr ldRepl tyLib . children "type"
-  where
-    ldRepl n lib = let name = n @! "name"
-                   in  insert name (mkType name lib n) lib 
-
-loadTemplLib :: (Target l, FNode f)
-             => Dict (Comp l)  -- ^ existing library of components
-             -> f              -- ^ @\<root\>@ node
-             -> Dict (Comp l)  -- ^ updated library of components
-loadTemplLib compLib =  foldr ldRepl compLib . children "template"
-  where
-    ldRepl n lib = let name    = n @! "name"
-                       reqmnts = mkRequirements n
-                       templ   = textToTm (unpack name) (txtContent n)
-                   in  if name `member` lib
-                       then lib
-                       else insert name (TmComp name empty reqmnts empty templ) lib 
-
-loadNvLib :: (Target l, FNode f)
-          => Dict (Comp l)  -- ^ existing library of components
-          -> f              -- ^ @\<root\>@ node
-          -> Dict (Comp l)  -- ^ updated library of components
-loadNvLib compLib =  foldr ldRepl compLib . children "native"
-  where
-    ldRepl n lib = let name    = n @! "name"
-                       reqmnts = mkRequirements n
-                       code    = case n @? "fromFile" of
-                                   Nothing -> Right $ txtContent n
-                                   Just a  -> Left $ unpack a
-                   in  if name `member` lib
-                       then lib
-                       else insert name (NvComp name empty reqmnts code) lib 
-
-        
