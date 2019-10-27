@@ -11,7 +11,7 @@
 -- This module contains the CoInSyDe template language and the
 -- template language parser.
 ----------------------------------------------------------------------
-module CoInSyDe.TTmParse (
+module CoInSyDe.TTm (
   TTm(..), textToTm
   ) where
 

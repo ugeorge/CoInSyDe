@@ -56,16 +56,11 @@
 --   entries with the same ID are being kept new ones are ignored.
 ------------------------------------------------------------------------
 module CoInSyDe.LibManage (
-  PathAnd
-  -- ** Constructors/Destructors
-  , wrapPath, unwrapPath, getPath, dropPath
-  -- ** Path methods
-  , getLibs, groupByTarget 
-  -- ** Sanity Checkers
-  , uniqueNamesLib
-  -- ** Loaders/Dumpers
-  , readLibDoc, loadLibObj, dumpLibObj
-  ) where
+  buildLoadLists,
+  loadTypeLibs,loadCompLibs,loadProject,
+  loadLibObj, dumpLibObj
+  )
+where
 
 #ifdef mingw32_HOST_OS
 import System.FilePath.Windows
@@ -73,71 +68,124 @@ import System.FilePath.Windows
 import System.FilePath.Posix
 #endif
 import System.Directory
+import Control.Monad (foldM)
 import Data.List
-import Data.Text (Text,pack,unpack)
+import Data.Text (Text,pack,unpack,splitOn)
 import Data.Text.Encoding (encodeUtf8,decodeUtf8)
 import qualified Data.ByteString as B
+
+import CoInSyDe.Core
 import CoInSyDe.Frontend
+import CoInSyDe.Frontend.XML ()
+import Text.XML.Light as XML (Element)
 
--- | Convenience wapper for associating any container with its origin file path.
-newtype PathAnd a = PathAnd (FilePath,a) deriving (Show)
+-- | Returns a path-wrapped frontend root node (e.g. XML root element). Should not be
+-- used alone, but within a @case@ block to avoid ambiguous instances.
+readLibDoc :: FNode f => FilePath -> IO f
+readLibDoc path = B.readFile path >>= return . readDoc path
 
-instance Functor PathAnd where
-  fmap f (PathAnd (p,a)) = PathAnd (p, f a)
+buildLoadLists :: String
+               -> String
+               -> IO ([FilePath],[FilePath])
+buildLoadLists target ldLibraryPath = do
+  let libs = splitSearchPath ldLibraryPath
+  allPaths <- mapM listDirectory libs
+  let -- select only the paths compatible to the target
+      trgLibs  = (map . filter) (isOf target . getTrg) allPaths
+      -- separate into two groups by what they contain: types and components
+      typeLibs = (map . filter) ((==".type") . getType) trgLibs
+      compLibs = (map . filter) ((`elem`[".template",".native"]) . getType) trgLibs
+      -- sort the two groups based on their respective loading rules
+      ordTyLib = (map . sortOn) (length . getTrg) typeLibs
+      ordCpLib = reverse $ map (reverse . sortOn (length . getTrg)) typeLibs
+      -- further group based on "same target" for sanity checks. Flatten outer
+      -- (by-library) grouping
+      allTrgs  = nub $ (concatMap . concatMap) getTrg trgLibs
+      grpTyLib = concatMap ((map . map) (\t -> filter (==t) allTrgs)) ordTyLib
+      grpCpLib = concatMap ((map . map) (\t -> filter (==t) allTrgs)) ordCpLib
+  --  extract all IDs from the libraries
+  tyNames <- (mapM . mapM) (pathToNameList ["type"]) grpTyLib
+  cpNames <- (mapM . mapM) (pathToNameList ["template","native"]) grpCpLib
+  -- do sanity checks over all extracted names (throws error). Keep only
+  -- paths. Flatten the path lists.
+  let tyFinal = concatMap noNameDuplicates $ zip grpTyLib tyNames
+      cpFinal = concatMap noNameDuplicates $ zip grpCpLib cpNames
+  return (tyFinal,cpFinal)
+  where
+    getTrg  = fst . trgAndType
+    getType = snd . trgAndType
 
-wrapPath p c = PathAnd (p,c)
-unwrapPath (PathAnd (p,c)) = (p,c)
-getPath    (PathAnd (p,_)) = p
-dropPath   (PathAnd (_,c)) = c
+-- "path/to/name.C.ucosii.type.xml" -> (".C.ucosii",".type")
+trgAndType = splitExtensions . snd . splitExtensions . takeBaseName
 
--- | Pair-wise concatenates a list of path-wrappers into one wrapper. The resulting
--- path will have a posix-like format, i.e. @path1:path2:path3@.
-catPA :: [PathAnd [a]] -> PathAnd [a]
-catPA pcs = let (ps, cs) = unzip $ map unwrapPath pcs
-            in PathAnd (intercalate ":" ps, concat cs)
-
--- | Checks that all files in a certain library do not contain identifier duplicates
--- for the same target.
-uniqueNamesLib :: FNode f
-               => String      -- ^ @\<what\>@ kind of library files are tested
-               -> [PathAnd f] -- ^ all listed files found at a library path
-               -> ()
-uniqueNamesLib what = uniqueNames . catPA . (map . fmap) allNames
-  where allNames = map (@!"name") . children what
+isOf target = all (`elem` mkTOrd target) . mkTOrd
+  where mkTOrd = splitOn (pack ".") . pack
 
 -- | Checks that there are no name duplicates from the extracted \"names\" fields from
 -- the same library having the same target.
-uniqueNames :: PathAnd [Text] -> ()
-uniqueNames (PathAnd (path,names))
-  | null dup  = ()
-  | otherwise = error $ "Duplicate names "++ show dup ++ " in file(s) " ++ path
-  where (_,dup) = foldr scanDup ([],[]) names
+noNameDuplicates :: ([FilePath],[[Text]]) -> [FilePath]
+noNameDuplicates (paths,names)
+  | null dup  = paths
+  | otherwise = error $ "Duplicate names "++ show dup ++ " in file(s) " ++ show paths
+  where (_,dup) = foldr scanDup ([],[]) (concat names)
         scanDup n (ns,ds) = if n `elem` ns then (ns,n:ds) else (n:ns,ds) 
 
--- | Groups all files belonging to a library in sub-lists based on their kind and
--- target.
-groupByTarget :: String       -- ^ @\<what\>@ kind of library files are being grouped
-              -> [FilePath]   -- ^ all files listed for a library path
-              -> [[FilePath]]
-groupByTarget what paths =  map (\t -> filter (isOf t) paths) targets
-  where
-    targets = nub $ map (fst . getTarget) paths
-    -- "path/to/name.C.ucosii.type.xml" -> (".C.ucosii",".type")
-    getTarget = splitExtensions . snd . splitExtensions . takeBaseName
-    isOf trg = (==) (trg , '.' : what) . getTarget
-
--- | Returns a grouped list with all files from all libraries pointed by
--- @$COINSYDE_PATH@.
-getLibs :: String -> IO [[FilePath]]
-getLibs ldLibraryPath = do
-  let libs = splitSearchPath ldLibraryPath
-  mapM listDirectory libs
+-- TODO: update when new frontends added
+pathToNameList what path = 
+  case takeExtension path of
+    ".xml" -> do
+      xml <- readLibDoc path :: IO XML.Element
+      return $ map (@!"name") $ childrenOf what xml
+    _ -> return []
 
 ---------------------------------------------------------------------
 
--- | Returns a path-wrapped frontend root node (e.g. XML root element). 
-readLibDoc :: FNode f => FilePath -> IO (PathAnd f)
-readLibDoc path = B.readFile path >>= return . wrapPath path . readDoc path
+loadTypeLibs :: Target l
+             => [FilePath]
+             -> IO (LdHistory (Type l))
+loadTypeLibs = foldM loadLib emptyHistory
+  where
+    loadLib lib path  =
+      case takeExtension path of
+        ".xml" -> do
+          xml <- readLibDoc path :: IO XML.Element
+          return $ mkTypeLib lib path xml
+        _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
+
+loadCompLibs :: Target l
+             => Dict (Type l)
+             -> [FilePath]
+             -> IO (LdHistory (Comp l))
+loadCompLibs typeLib = foldM loadLib emptyHistory
+  where
+    mkLib path = case snd (trgAndType path) of
+      ".template" -> mkTemplateLib path
+      ".native"   -> mkNativeLib path typeLib
+      x -> error $ "Fatal error: trying to load library of type " ++ show x
+    loadLib lib path =
+      case takeExtension path of
+        ".xml" -> do
+          xml <- readLibDoc path :: IO XML.Element
+          return $ mkLib path lib xml
+        _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
+
+loadProject :: Target l
+            => l
+            -> Dict (Type l)
+            -> LdHistory (Comp l)
+            -> FilePath
+            -> IO (LdHistory (Comp l))
+loadProject lang typeLib compLibH path = 
+  case takeExtension path of
+    ".xml" -> do
+      xml <- readLibDoc path :: IO XML.Element
+      let plibH = mkPatternLib path typeLib compLibH xml
+          clibH = mkCompositeLib lang path typeLib plibH xml
+      return clibH
+    _ -> error $ "Cannot load project file " ++ show path
+
+---------------------------------------------------------------------
+
 
 -- | Dumps the content of a built dictionary into an @objdump@ file. TODO: dump to binary.
 dumpLibObj :: Show a

@@ -1,6 +1,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE StandaloneDeriving, DeriveAnyClass #-}
-{-# LANGUAGE TypeFamilies, FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies, FlexibleContexts, OverloadedStrings #-}
 ----------------------------------------------------------------------
 -- |
 -- Module      :  CoInSyDe.Core
@@ -16,11 +16,11 @@
 ----------------------------------------------------------------------
 module CoInSyDe.Core where
 
-import Data.Text (Text,unpack)
+import Data.Text as T (Text,unpack,null)
 import Data.Map.Lazy as M hiding (map,foldr,filter)
 
 import CoInSyDe.Frontend
-import CoInSyDe.TTmParse
+import CoInSyDe.TTm
 
 ------------- ALIASES -------------
 
@@ -48,8 +48,10 @@ class ( Show (If l),   Read (If l)
   mkType :: FNode f => Id -> Dict (Type l) -> f -> Type l
   -- | Constructor for interfaces used in common methods. 
   mkIf   :: FNode f => Id -> Dict (Type l) -> f -> If l
-  -- | constructor for requirement type
+  -- | Constructor for requirement type
   mkRequ :: FNode f => f -> Requ l
+  -- | Constructor for a composite template
+  mkComposite :: FNode f => l -> f -> [TTm]
 
 -- | Container for functional components or glue operators
 data Comp l where
@@ -66,10 +68,10 @@ data Comp l where
            } -> Comp l
   -- | Native functional. Code used \"as-is\", no manipulation done.
   NvComp :: Target l =>
-           { funName :: Id        -- ^ unique function ID
-           , ifs     :: IfMap l   -- ^ maps user port names to interface containers
-           , reqs    :: [Requ l]  -- ^ special requirements
-           , funCode :: Either FilePath Text -- ^ points to/contains native code
+           { funName :: Id         -- ^ unique function ID
+           , ifs     :: IfMap l    -- ^ maps user port names to interface containers
+           , reqs    :: [Requ l]   -- ^ special requirements
+           , funCode :: Maybe Text -- ^ points to/contains native code
            } -> Comp l
 deriving instance Target l => Show (Comp l)
 deriving instance Target l => Read (Comp l)
@@ -85,50 +87,143 @@ deriving instance Target l => Show (Instance l)
 deriving instance Target l => Read (Instance l)
 -- deriving instance Target l => Eq (Instance l)
 
-------------- DICTIONARY BUILDERS -------------
+------------- EXPORTED DICTIONARY BUILDERS -------------
 
--- | Builds a dictionary of functionals from all child nodes
+type LdHistory d = (Dict [FilePath], Dict d)
+emptyHistory = (empty,empty)
+
+-- | Builds a type dictionaty and load history from nodes
 --
--- > <root>/pattern|composite|template|native[@name=*,...]
---
--- Uses pretty much all of the other maker functions in this module as well from the
--- 'Target' API.
-mkFunDict :: (Target l, FNode f)
-          => (Id -> f -> [TTm]) -- ^ Function for creating composite templates,
-                                --   relevant to the target language.
-          -> Dict (Type l)      -- ^ Existing dictionary of types
-          -> Dict (Comp l)      -- ^ Existing (library) dictionary of templates
-          -> f                  -- ^ Root node.
-          -> Dict (Comp l)      -- ^ Dictionary of templates created from this root.
-mkFunDict mkComposite typeLib patternLib root =
-  M.fromList $ patterns ++ composites ++ natives ++ templates
+--  > <root>/type[@name=*,...]
+-- 
+-- Replaces existing entries if their IDs match. Made to be used with the CoInSyDe
+-- library load scheme, see "CoInSyDe.LibManage". Uses 'mkType' from the 'Target' API.
+mkTypeLib :: (Target l, FNode f)
+          => LdHistory (Type l)  -- ^ existing library of types
+          -> FilePath            -- ^ file being loaded, for history bookkeeping
+          -> f                   -- ^ @\<root\>@ node
+          -> LdHistory (Type l)  -- ^ updated library of types
+mkTypeLib tyLibH fPath =  foldr ldRepl tyLibH . children "type"
   where
-    patterns   = map (mkTmComp mkLibTempl)  $ root |= "pattern"
-    composites = map (mkTmComp mkComposite) $ root |= "composite"
-    templates  = map (mkTmComp mkTextTempl) $ root |= "template"
-    natives    = map mkNvComp               $ root |= "native"
-    -----------------------------------
-    mkNvComp node = (name, NvComp name interfs reqmnts code)
-      where
-        name    = node @! "name" 
-        interfs = mkIfDict typeLib name node
-        reqmnts = mkRequirements node
-        code    = getCode $ node @? "fromFile"
-        getCode Nothing  = Right $ txtContent node
-        getCode (Just a) = Left $ unpack a
-    -----------------------------------
-    mkTmComp mkTempl node = (name, TmComp name interfs reqmnts binds templ)
-      where
-        name    = node @! "name"
-        templ   = mkTempl name node
-        interfs = mkIfDict typeLib name node
-        binds   = mkInstances interfs node
-        reqmnts = mkRequirements node
-    -----------------------------------       
-    mkLibTempl  name node = template $ patternLib ! (node @! "type")
-    mkTextTempl name node = textToTm (unpack name) (txtContent node)
-    -----------------------------------       
+    ldRepl n (hist,lib)
+      = let name    = n @! "name"
+            newHist = insertWith (++) name [fPath] hist
+            newLib  = insert name (mkType name lib n) lib
+        in (newHist,newLib)
 
+-- | Builds a component dictionaty and load history from nodes
+--
+--  > <root>/native[@name=*]CTEXT?
+-- 
+-- These nodes /might/ contain a @CTEXT@ field with the source code for the native
+-- function. If it does not, then a @requirement@ child node pointing to the library
+-- file where the function is defined is necessary.
+--
+-- Does __not__ replace entry if ID exists, see "CoInSyDe.LibManage" for load scheme.
+mkNativeLib :: (Target l, FNode f)
+            => FilePath            -- ^ file being loaded, for history bookkeeping
+            -> Dict (Type l)       -- ^ (fully-loaded) library of types
+            -> LdHistory (Comp l)  -- ^ existing library of components
+            -> f                   -- ^ @\<root\>@ node
+            -> LdHistory (Comp l)  -- ^ updated library of components
+mkNativeLib fPath typeLib compLibH = foldr ldRepl compLibH . children "native"
+  where
+    ldRepl n (hist,lib)
+      = let name    = n @! "name"
+            reqmnts = mkRequirements n
+            interfs = mkIfDict typeLib name n
+            code    = case (txtContent n,reqmnts) of
+                        ("",[]) -> error $ "Native node " ++ show name ++ " in file "
+                                   ++ show fPath ++ ": code or requirement missing!"
+                        ("",_)  -> Nothing
+                        (c,_)   -> Just c
+            newComp = NvComp name interfs reqmnts code
+            newHist = insertWith (++) name [fPath] hist
+            newLib  | name `member` lib = lib
+                    | otherwise         = insert name newComp lib
+        in (newHist,newLib)
+
+-- | Builds a component dictionaty and load history from nodes
+--
+--  > <root>/template[@name=*]CTEXT
+-- 
+-- The @CTEXT@ needs to be written in a template langiage, see 'TTm'.
+--
+-- Does __not__ replace entry if ID exists, see "CoInSyDe.LibManage" for load scheme.
+mkTemplateLib :: (Target l, FNode f)
+              => FilePath            -- ^ file being loaded, for history bookkeeping
+              -> LdHistory (Comp l)  -- ^ existing library of components
+              -> f                   -- ^ @\<root\>@ node
+              -> LdHistory (Comp l)  -- ^ updated library of components
+mkTemplateLib fPath compLibH = foldr ldRepl compLibH . children "template"
+  where
+    ldRepl n (hist,lib)
+      = let name    = n @! "name"
+            reqmnts = mkRequirements n
+            templ   = textToTm (unpack name) (txtContent n)
+            newComp = TmComp name empty reqmnts empty templ
+            newHist = insertWith (++) name [fPath] hist
+            newLib  | name `member` lib = lib
+                    | otherwise         = insert name newComp lib
+        in (newHist,newLib)
+
+-- | Builds a component dictionaty and load history from all nodes
+--
+--  > <root>/pattern[@name=*,@type=*]
+-- 
+-- __OBS:__ Patterns are usually found in project files, and require that all template
+-- libraries have been fully loaded. Replaces any previously-loaded component with the
+-- same name. TODO: is this right, or should it throw error?
+mkPatternLib :: (Target l, FNode f)
+             => FilePath            -- ^ file being loaded, for history bookkeeping
+             -> Dict (Type l)       -- ^ (fully-loaded) library of types
+             -> LdHistory (Comp l)  -- ^ existing library of components
+             -> f                   -- ^ @\<root\>@ node
+             -> LdHistory (Comp l)  -- ^ updated library of components
+mkPatternLib fPath typeLib compLibH = foldr ldRepl compLibH . children "pattern"
+  where
+    ldRepl n (hist,lib)
+      = let name    = n @! "name"
+            interfs = mkIfDict typeLib name n
+            reqmnts = mkRequirements n
+            binds   = mkInstances interfs n
+            templ   = template $ lib ! (n @! "type")
+            newComp = TmComp name interfs reqmnts binds templ
+            newHist = insertWith (++) name [fPath] hist
+            newLib  = insert name newComp lib
+        in (newHist,newLib)
+
+-- | Builds a component dictionaty and load history from nodes
+--
+--  > <root>/composite[@name=*,@type=*]CTEXT?
+-- 
+-- __OBS:__ Patterns are usually found in project files, and require that all template
+-- libraries have been fully loaded. Replaces any previously-loaded component with the
+-- same name. TODO: is this right, or should it throw error?
+mkCompositeLib :: (Target l, FNode f)
+               => l                   -- ^ proxy to determine language
+               -> FilePath            -- ^ file being loaded, for history bookkeeping
+               -> Dict (Type l)       -- ^ (fully-loaded) library of types
+               -> LdHistory (Comp l)  -- ^ existing library of components
+               -> f                   -- ^ @\<root\>@ node
+               -> LdHistory (Comp l)  -- ^ updated library of components
+mkCompositeLib lang fPath typeLib compLibH =
+  foldr ldRepl compLibH . children "composite"
+  where
+    ldRepl n (hist,lib)
+      = let name    = n @! "name"
+            interfs = mkIfDict typeLib name n
+            reqmnts = mkRequirements n
+            binds   = mkInstances interfs n
+            templ   = case txtContent n of
+                        "" -> mkComposite lang n
+                        tm -> textToTm (unpack name) tm
+            newComp = TmComp name interfs reqmnts binds templ
+            newHist = insertWith (++) name [fPath] hist
+            newLib  = insert name newComp lib
+        in (newHist,newLib)
+
+------------- INTERNAL DICTIONARY BUILDERS -------------
 
 -- | Makes a dictionary of interfaces operations from all the child nodes
 --
@@ -189,80 +284,3 @@ mkRequirements :: (Target l, FNode f)
                -> [Requ l]
 mkRequirements = map mkRequ . children "requirement"
 
----------------------------------------------------------------------
-
-type LdHistory d = (Dict [FilePath], Dict d)
-
--- | Builds a type dictionaty and load history from all nodes
---
---  > <root>/type[@name=*,...]
--- 
--- Replaces existing entries if their IDs match. Made to be used with the CoInSyDe
--- library load scheme, see "CoInSyDe.LibManage". Uses 'mkType' from the 'Target' API.
-loadTypeLib :: (Target l, FNode f)
-            => LdHistory (Type l)  -- ^ existing library of types
-            -> FilePath            -- ^ file being loaded, for history bookkeeping
-            -> f                   -- ^ @\<root\>@ node
-            -> LdHistory (Type l)  -- ^ updated library of types
-loadTypeLib tyLibH fPath =  foldr ldRepl tyLibH . children "type"
-  where
-    ldRepl n (hist,lib)
-      = let name    = n @! "name"
-            newHist = insertWith (++) name [fPath] hist
-            newLib  = insert name (mkType name lib n) lib
-        in (newHist,newLib)
-
--- | Builds a component dictionaty and load history from all nodes
---
---  > <root>/template[@name=*,...]
--- 
--- Replaces existing entries if their IDs match. Made to be used with the CoInSyDe
--- library load scheme, see "CoInSyDe.LibManage". Uses 'mkRequirements'.
-loadTemplLib :: (Target l, FNode f)
-             => LdHistory (Comp l)  -- ^ existing library of components
-             -> FilePath            -- ^ file being loaded, for history bookkeeping
-             -> f                   -- ^ @\<root\>@ node
-             -> LdHistory (Comp l)  -- ^ updated library of components
-loadTemplLib compLibH fPath = foldr ldRepl compLibH . children "template"
-  where
-    ldRepl n (hist,lib)
-      = let name    = n @! "name"
-            reqmnts = mkRequirements n
-            templ   = textToTm (unpack name) (txtContent n)
-            newComp = TmComp name empty reqmnts empty templ
-            newHist = insertWith (++) name [fPath] hist
-            newLib  | name `member` lib = lib
-                    | otherwise         = insert name newComp lib
-        in (newHist,newLib)
-
-
--- | Builds a component dictionaty and load history from all nodes
---
---  > <root>/template[@name=*,...]
--- 
--- Replaces existing entries if their IDs match. Made to be used with the CoInSyDe
--- library load scheme, see "CoInSyDe.LibManage". Uses 'mkRequirements'.
-loadNativeLib :: (Target l, FNode f)
-              => LdHistory (Comp l)  -- ^ existing library of components
-              -> FilePath            -- ^ file being loaded, for history bookkeeping
-              -> f                   -- ^ @\<root\>@ node
-              -> LdHistory (Comp l)  -- ^ updated library of components
-loadNativeLib compLibH fPath = foldr ldRepl compLibH . children "native"
-  where
-    ldRepl n (hist,lib)
-      = let name    = n @! "name"
-            reqmnts = mkRequirements n
-            code    = case n @? "fromFile" of
-                        Nothing -> Right $ txtContent n
-                        Just a  -> Left $ unpack a
-            newComp = NvComp name empty reqmnts code
-            newHist = insertWith (++) name [fPath] hist
-            newLib  | name `member` lib = lib
-                    | otherwise         = insert name newComp lib
-        in (newHist,newLib)
-        
--- | Returns a list with the names for only the top-level components defined by the
--- main project file. This is needed to start the recursive library search for code
--- generation.
-getCompProj :: FNode n => n -> [Id]
-getCompProj = map (@! "name") . childrenOf ["composite","template","pattern"]

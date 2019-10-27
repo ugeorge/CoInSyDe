@@ -9,11 +9,34 @@ import System.IO
 import Control.Monad (when)
 import Data.List
 import Data.Maybe
+import Data.Text.Prettyprint.Doc
+import Data.Text.Prettyprint.Doc.Render.Text
+import Text.XML.Light as XML
+
+import CoInSyDe.Frontend.XML
+import CoInSyDe.LibManage
+
 
 main = do
-  args <- getArgs >>= parse
-  print args
+  args    <- getArgs >>= parse
+  -- xmlLibs <- getLibs (libsC args)
+    -- inFile  <- readFile (infC args)
+  -- xml = getXml $ parseXMLDoc inxml
+  return ()
 
+data Commands
+  = CFlags { nameC   :: String
+           , debugC  :: Maybe (IO Handle)
+           , layoutC :: LayoutOptions
+           , targetC :: String
+           , forceC  :: Bool
+           , docsC   :: Maybe String
+           , infC    :: FilePath
+           , outpC   :: Maybe FilePath
+           , objpC   :: FilePath
+           , libsC   :: String
+           }
+  
 data Flag
   -- control
   = Debug    String
@@ -60,18 +83,6 @@ flags =
   ]
 header = "Usage: f2c -TNAME [options] input_file"
 
-data Commands = CFlags
-                { nameC   :: String
-                , debugC  :: Either Bool String
-                , widthC  :: Maybe Int
-                , targetC :: String
-                , forceC  :: Bool
-                , docsC   :: Maybe String
-                , outpC   :: Maybe FilePath
-                , objpC   :: FilePath
-                , libsC   :: [FilePath]
-                } deriving (Show)
-  
 parse argv =
   case getOpt Permute flags argv of
     (_  ,[],[]) -> error "Please provide an input file!"
@@ -82,13 +93,13 @@ parse argv =
                       [x]  -> return x
       origLibs <- readLib
       let debug  = case [x | Debug x <- args] of
-                     []   -> Left False
-                     [""] -> Left True
-                     [x]  -> Right x
+                     []   -> Nothing
+                     [""] -> Just $ return stdout
+                     [x]  -> Just $ openFile x WriteMode
                      _    -> error "Too many arguments to --debug!"
-          width  = case [x | LineW x <- args] of
-                     []  -> Nothing
-                     [x] -> Just (read x :: Int)
+          layout = case [x | LineW x <- args] of
+                     []  -> defaultLayoutOptions
+                     [x] -> LayoutOptions $ AvailablePerLine (read x :: Int) 1.0
                      _   -> error "Too many arguments to --line-width!"
           target = case [x | TrgName x <- args] of
                      [x] -> x
@@ -108,14 +119,14 @@ parse argv =
                      []   -> (fromMaybe "." outp) </> "obj"
                      [""] -> (fromMaybe "." outp) </> "obj"
                      [x]  -> x
-          libs     = splitSearchPath origLibs ++ concatMap splitSearchPath [x | LoadPath x <- args]
-          projName = takeBaseName $ head n
+          libs   = origLibs ++ intercalate ":" [x | LoadPath x <- args]
+          inFile = head n
+          projNm = takeBaseName inFile
       if Help `elem` args
         then do hPutStrLn stderr (usageInfo header flags)
                 exitSuccess
-        else return $ CFlags projName debug width target force docs outp objp libs
+        else return $ CFlags projNm debug layout target force docs inFile outp objp libs
   
     (_,_,errs) -> do
       hPutStrLn stderr (concat errs ++ usageInfo header flags)
       exitWith (ExitFailure 1)
-

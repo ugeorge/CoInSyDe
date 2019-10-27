@@ -15,11 +15,11 @@
 module CoInSyDe.Backend.C.Core where
 
 import CoInSyDe.Core
+import CoInSyDe.TTm
 import CoInSyDe.Frontend
--- import Data.List (nub)
-import Data.Text (Text,append,snoc)
+import Data.Text (Text,pack,append,snoc)
 import Data.Text.Read
-import Data.Map.Lazy as M hiding (map,filter)
+import Data.Map.Lazy as M hiding (map,filter,take)
 
 -- | Defines the family of C target languages. In particular it defines a set of types
 -- (see 'Type C'), a set of interfaces (see 'If C') and a set of requirements (see
@@ -68,6 +68,9 @@ instance Target C where
 
   data Requ C = Include Text deriving (Read, Show, Eq)
   mkRequ node = Include (node @! "include")
+
+  mkComposite _ node =
+    map (TCode . pack . show) $ take (length $ node |= "instance") [1::Int ..]
 
 ------ TYPE CONSTRUCTORS ------
 
@@ -181,11 +184,7 @@ isState _             = False
 isVariable LocVar{}   = True
 isVariable _          = False
 
------- COMPOSITE TEMPLATE CONSTRUCTOR ------
-
--- TODO
-
------- SPECIFIC COMPILER CHAIN DICTIONARIES ------
+------ SPECIFIC DICTIONARIES ------
 
 -- mkStateDict :: FNode n => Dict (Type C) -> n -> IfMap C
 -- mkStateDict tyLib root = M.fromList states
