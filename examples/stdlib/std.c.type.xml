@@ -1,0 +1,12 @@
+<library name="standard" contains="type" target="c">
+    <type name="Int" class="primitive" targetName="int"/>
+    <type name="Integer" class="primitive" targetName="long long int"/>
+    <type name="UInt" class="primitive" targetName="unsigned"/>
+    <type name="UInteger" class="primitive" targetName="unsigned long long"/>
+    <type name="Float" class="primitive" targetName="float"/>
+    <type name="Double" class="primitive" targetName="double"/>
+    <type name="Bool" class="enum" targetName="bool_t">
+	<parameter name="false"/>
+	<parameter name="true"/>
+    </type>
+</library>

@@ -4,39 +4,95 @@ import System.Console.GetOpt
 import System.Environment
 import System.Exit
 import System.FilePath
+import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.IO
 
-import Control.Monad (when)
+import Control.Monad (when,liftM)
 import Data.List
 import Data.Maybe
+import Text.Pretty.Simple (pHPrint)
 import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Text
-import Text.XML.Light as XML
 
-import CoInSyDe.Frontend.XML
 import CoInSyDe.LibManage
-
+import CoInSyDe.Core
+import CoInSyDe.Backend.C
 
 main = do
-  args    <- getArgs >>= parse
-  -- xmlLibs <- getLibs (libsC args)
-    -- inFile  <- readFile (infC args)
-  -- xml = getXml $ parseXMLDoc inxml
+  cmd <- getArgs >>= parse
+  dHandle <- getDebugHandler cmd
+  when (isDebug cmd) $ hPrint dHandle cmd
+  
+  -- check if libraries already loaded
+  let tyObjPath = objp cmd </> name cmd <.> target cmd <.> "type" <.> "objdump"
+      cpObjPath = objp cmd </> name cmd <.> target cmd <.> "component" <.> "objdump"
+  isTyObj <- doesFileExist tyObjPath
+  isCpObj <- doesFileExist cpObjPath
+
+  -- load types and components/templates libraries
+  ((tyHist,tyLib),(cpHist',cpLib')) <- case isTyObj && isCpObj && not (force cmd) of
+    -- if already existing, load previously-built objdumps
+    True  -> do
+      tyObj <- loadLibObj tyObjPath :: IO (LdHistory (Type C))
+      cpObj <- loadLibObj cpObjPath :: IO (LdHistory (Comp C))
+      return (tyObj,cpObj)
+    -- if not, build libraries and put them in objdumps
+    False -> do
+      (tyLdList,cpLdList) <- buildLoadLists (target cmd) (libs cmd) (infile cmd)
+
+      -- double check the load paths are correct
+      when (isDebug cmd) $ debugPrintLdPaths dHandle (libs cmd) tyLdList cpLdList
+
+      tyObj <- loadTypeLibs tyLdList
+      cpObj <- loadCompLibs (snd tyObj) cpLdList
+      createDirectoryIfMissing True (objp cmd)
+      dumpLibObj tyObjPath tyObj
+      dumpLibObj cpObjPath cpObj
+      return (tyObj,cpObj)
+      
+  -- finally with all types and template libraries, load the C project
+  (cpHist,cpLib) <- loadProject C tyLib (cpHist',cpLib') (infile cmd)
+
+  -- double-check: pretty-print all loaded libraries
+  when (isDebug cmd) $ debugLoadedLibs dHandle tyLib tyHist cpLib' cpHist'
   return ()
+  where
+    debugPrintLdPaths handler ldPaths tyLdList cpLdList = do
+      hPutStrLn handler $ "$COINSYDE_PATH = " ++ ldPaths
+      hPutStrLn handler $ "** Loading type libs: " ++ show tyLdList
+      hPutStrLn handler $ "** Loading component libs: " ++ show cpLdList
+    debugLoadedLibs handler tyLib tyHist cpLib cpHist = do
+      pHPrint handler "\n*** LOADED TYPE LIBRARY ***\n"
+      pHPrint handler tyLib
+      pHPrint handler "\n*** LOADED TYPE HISTORY ***\n"
+      pHPrint handler tyHist
+      pHPrint handler "\n*** LOADED COMPONENT LIBRARY ***\n"
+      pHPrint handler cpLib
+      pHPrint handler "\n*** LOADED COMPONENT HISTORY ***\n"
+      pHPrint handler cpHist
+     
 
 data Commands
-  = CFlags { nameC   :: String
-           , debugC  :: Maybe (IO Handle)
-           , layoutC :: LayoutOptions
-           , targetC :: String
-           , forceC  :: Bool
-           , docsC   :: Maybe String
-           , infC    :: FilePath
-           , outpC   :: Maybe FilePath
-           , objpC   :: FilePath
-           , libsC   :: String
-           }
-  
+  = CFlags { name   :: String
+           , debug  :: Either Bool FilePath
+           , layout :: LayoutOptions
+           , target :: String
+           , force  :: Bool
+           , docs   :: Maybe String
+           , infile :: FilePath
+           , outp   :: Maybe FilePath
+           , objp   :: FilePath
+           , libs   :: String
+           } deriving (Show)
+
+isDebug x = case debug x of
+  Left False -> False
+  _ -> True
+getDebugHandler x = case debug x of
+  Left False -> return stderr
+  Left True  -> return stdout
+  Right o    -> openFile o WriteMode
+
 data Flag
   -- control
   = Debug    String
@@ -69,7 +125,7 @@ flags =
     "Target name (mandatory). Check documentation for supported target names. Default is .c"
   , Option ['f'] ["force-load"] (NoArg ForceLd)
     "Forces parsing and loading libraries for the current project."
-  , Option ['d'] ["docs"] (OptArg (BuildDoc . fromMaybe "") "FORMAT")
+  , Option ['D'] ["docs"] (OptArg (BuildDoc . fromMaybe "") "FORMAT")
     "Dumps the documentation for current project in given format. Default is html."
   -- Path flags
   , Option ['o'] ["out-path"] (ReqArg OutPath "PATH")
@@ -85,17 +141,16 @@ header = "Usage: f2c -TNAME [options] input_file"
 
 parse argv =
   case getOpt Permute flags argv of
-    (_  ,[],[]) -> error "Please provide an input file!"
     (args,n,[]) -> do
-      let readLib = case [x | LibsPath x <- args] of
-                      []   -> getEnv "COINSYDE_PATH"
-                      [""] -> error "You cannot leave --with-libs empty!"
-                      [x]  -> return x
-      origLibs <- readLib
+      origLibs <- case [x | LibsPath x <- args] of
+                    []   -> getEnv "COINSYDE_PATH"
+                    [""] -> error "You cannot leave --with-libs empty!"
+                    [x]  -> return x
+                    _    -> error "Error parsing library paths CLI argument."
       let debug  = case [x | Debug x <- args] of
-                     []   -> Nothing
-                     [""] -> Just $ return stdout
-                     [x]  -> Just $ openFile x WriteMode
+                     []   -> Left False
+                     [""] -> Left True
+                     [x]  -> Right x
                      _    -> error "Too many arguments to --debug!"
           layout = case [x | LineW x <- args] of
                      []  -> defaultLayoutOptions
@@ -119,8 +174,9 @@ parse argv =
                      []   -> (fromMaybe "." outp) </> "obj"
                      [""] -> (fromMaybe "." outp) </> "obj"
                      [x]  -> x
-          libs   = origLibs ++ intercalate ":" [x | LoadPath x <- args]
-          inFile = head n
+          libs   = origLibs ++ ":" ++ intercalate ":" [x | LoadPath x <- args]
+          inFile | null n = error "Please provide an input file!"
+                 | otherwise = head n
           projNm = takeBaseName inFile
       if Help `elem` args
         then do hPutStrLn stderr (usageInfo header flags)

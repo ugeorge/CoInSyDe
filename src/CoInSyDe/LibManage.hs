@@ -68,8 +68,9 @@ import System.FilePath.Windows
 import System.FilePath.Posix
 #endif
 import System.Directory
-import Control.Monad (foldM)
+import Control.Monad (foldM,liftM)
 import Data.List
+import Data.Function (on)
 import Data.Text (Text,pack,unpack,splitOn)
 import Data.Text.Encoding (encodeUtf8,decodeUtf8)
 import qualified Data.ByteString as B
@@ -86,23 +87,23 @@ readLibDoc path = B.readFile path >>= return . readDoc path
 
 buildLoadLists :: String
                -> String
+               -> FilePath
                -> IO ([FilePath],[FilePath])
-buildLoadLists target ldLibraryPath = do
+buildLoadLists target ldLibraryPath projFile = do
   let libs = splitSearchPath ldLibraryPath
-  allPaths <- mapM listDirectory libs
-  let -- select only the paths compatible to the target
-      trgLibs  = (map . filter) (isOf target . getTrg) allPaths
+  allPaths <- mapM (liftM filterHidden . listDirAbs) libs
+      -- select only the paths compatible to the target
+  let trgLibs  = (map . filter) (isOf target . getTrg) allPaths
       -- separate into two groups by what they contain: types and components
       typeLibs = (map . filter) ((==".type") . getType) trgLibs
       compLibs = (map . filter) ((`elem`[".template",".native"]) . getType) trgLibs
       -- sort the two groups based on their respective loading rules
       ordTyLib = (map . sortOn) (length . getTrg) typeLibs
-      ordCpLib = reverse $ map (reverse . sortOn (length . getTrg)) typeLibs
+      ordCpLib = (reverse . map (reverse . sortOn (length . getTrg))) compLibs
       -- further group based on "same target" for sanity checks. Flatten outer
       -- (by-library) grouping
-      allTrgs  = nub $ (concatMap . concatMap) getTrg trgLibs
-      grpTyLib = concatMap ((map . map) (\t -> filter (==t) allTrgs)) ordTyLib
-      grpCpLib = concatMap ((map . map) (\t -> filter (==t) allTrgs)) ordCpLib
+      grpTyLib = concatMap (groupBy ((==) `on` getTrg)) ordTyLib ++ [[projFile]]
+      grpCpLib = [projFile] : concatMap (groupBy ((==) `on` getTrg)) ordCpLib
   --  extract all IDs from the libraries
   tyNames <- (mapM . mapM) (pathToNameList ["type"]) grpTyLib
   cpNames <- (mapM . mapM) (pathToNameList ["template","native"]) grpCpLib
@@ -112,11 +113,14 @@ buildLoadLists target ldLibraryPath = do
       cpFinal = concatMap noNameDuplicates $ zip grpCpLib cpNames
   return (tyFinal,cpFinal)
   where
+    -- TODO: better way to filter out hidden files
+    filterHidden paths = [x | x <- paths, '~' `notElem` x, '#' `notElem` x]
+    listDirAbs dir = listDirectory dir >>= mapM (canonicalizePath . (dir </>))
     getTrg  = fst . trgAndType
     getType = snd . trgAndType
 
 -- "path/to/name.C.ucosii.type.xml" -> (".C.ucosii",".type")
-trgAndType = splitExtensions . snd . splitExtensions . takeBaseName
+trgAndType = splitExtension . snd . splitExtensions . takeBaseName
 
 isOf target = all (`elem` mkTOrd target) . mkTOrd
   where mkTOrd = splitOn (pack ".") . pack
@@ -145,12 +149,11 @@ loadTypeLibs :: Target l
              -> IO (LdHistory (Type l))
 loadTypeLibs = foldM loadLib emptyHistory
   where
-    loadLib lib path  =
-      case takeExtension path of
-        ".xml" -> do
-          xml <- readLibDoc path :: IO XML.Element
-          return $ mkTypeLib lib path xml
-        _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
+    loadLib lib path = case takeExtension path of
+      ".xml" -> do
+        xml <- readLibDoc path :: IO XML.Element
+        return $ mkTypeLib lib path xml
+      _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
 
 loadCompLibs :: Target l
              => Dict (Type l)
@@ -162,12 +165,11 @@ loadCompLibs typeLib = foldM loadLib emptyHistory
       ".template" -> mkTemplateLib path
       ".native"   -> mkNativeLib path typeLib
       x -> error $ "Fatal error: trying to load library of type " ++ show x
-    loadLib lib path =
-      case takeExtension path of
-        ".xml" -> do
-          xml <- readLibDoc path :: IO XML.Element
-          return $ mkLib path lib xml
-        _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
+    loadLib lib path = case takeExtension path of
+      ".xml" -> do
+        xml <- readLibDoc path :: IO XML.Element
+        return $ mkLib path lib xml
+      _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
 
 loadProject :: Target l
             => l
@@ -183,28 +185,18 @@ loadProject lang typeLib compLibH path =
           clibH = mkCompositeLib lang path typeLib plibH xml
       return clibH
     _ -> error $ "Cannot load project file " ++ show path
-
 ---------------------------------------------------------------------
 
 
 -- | Dumps the content of a built dictionary into an @objdump@ file. TODO: dump to binary.
 dumpLibObj :: Show a
-           => String    -- ^ project name/filename
-           -> String    -- ^ what is being dumped
-           -> FilePath  -- ^ dump directory
+           => FilePath  -- ^ dump directory
            -> a -> IO () 
-dumpLibObj target what path lib = do
-  let filepath = path </> target <.> what <.> "objdump"  
-  B.writeFile filepath $ encodeUtf8 $ pack $ show lib
+dumpLibObj path = B.writeFile path . encodeUtf8 . pack . show
 
 -- | Loads the content of a dictionary from an @objdump@ file. TODO: load from binary.
 loadLibObj :: Read b
-           => String    -- ^ project name/filename
-           -> String    -- ^ what is being loaded
-           -> FilePath  -- ^ load directory
+           => FilePath  -- ^ load directory
            -> IO b
-loadLibObj target what path = do
-  let filepath = path </> target <.> what <.> "objdump"
-  lib <- B.readFile filepath
-  return $ read $ unpack $ decodeUtf8 lib  
+loadLibObj path = liftM (read . unpack . decodeUtf8) (B.readFile path)  
 

@@ -3,3 +3,4 @@ stack.yaml.lock
 a.out
 coinsyde.cabal
 *~
+obj

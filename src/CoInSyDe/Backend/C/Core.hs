@@ -76,12 +76,12 @@ instance Target C where
 
 -- | Makes a 'PrimTy' from a node
 --
--- > type[@class="primitive",@targetName=*]
+-- > type[@name=*,@class="primitive",@targetName=*]
 mkPrimTy = PrimTy
 
 -- | Makes a 'BoolTy' from a node
 --
--- > type[@class="bool",@targetName=*]
+-- > type[@name=*,@class="bool",@targetName=*]
 -- > - parameter[@name="true",@value=*]
 -- > - parameter[@name="false",@value=*]
 mkBoolTy tName pNodes = BoolTy tName true false
@@ -90,21 +90,21 @@ mkBoolTy tName pNodes = BoolTy tName true false
 
 -- | Makes a 'EnumTy' from a node
 --
--- > type[@class="enum",@targetName=*]
+-- > type[@name=*,@class="enum",@targetName=*]
 -- > + parameter[@name=*,@?value=*]
 mkEnumTy tName pNodes = EnumTy tName (map extract pNodes)
   where extract n = (n @! "name", n @? "value")
 
 -- | Makes a 'Struct' from a node
 --
--- > type[@class="struct",@targetName=*]
+-- > type[@name=*,@class="struct",@targetName=*]
 -- > + parameter[@name=*,@type=*,@?value=*]
 mkStruct tyLib tName pNodes = Struct tName (M.fromList $ map extract pNodes)
   where extract n = (n @! "name", (tyLib ! (n @! "type"), n @? "value"))
 
 -- | Makes an 'Array' from a node
 --
--- > type[@class="array",@targetName=*]
+-- > type[@name=*,@class="array",@targetName=*]
 -- > - parameter[@name="baseType",@value=*]
 -- > - parameter[@name="size",@value=*]
 mkArray tyLib tName pNodes = Array tName baseTy size

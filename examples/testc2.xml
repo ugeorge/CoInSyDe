@@ -41,10 +41,6 @@
 	</binding>
     </composite>
 
-    <!-- TYPES -->
-    <type name="Bool" class="standard" alias="bool_t"/>
-    <type name="Int32" class="standard" alias="int"/>
-
     <!-- FUNCTION TEMPLATES -->
     <template name="+" call="inline">
 	(| ret |) = (| arg1 |) + (| arg2 |);

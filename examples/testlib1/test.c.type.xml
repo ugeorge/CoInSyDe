@@ -1,0 +1,6 @@
+<library name="standard" contains="type" target="c">
+    <type name="Bool" class="bool" targetName="bool_t">
+	<parameter name="true" value="1"/>
+	<parameter name="false" value="0"/>
+    </type>
+</library>
