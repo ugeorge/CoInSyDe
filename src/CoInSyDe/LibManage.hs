@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE CPP, FlexibleContexts #-}
 ----------------------------------------------------------------------
 -- |
 -- Module      :  CoinSyDe.LibManage
@@ -58,7 +58,7 @@
 module CoInSyDe.LibManage (
   buildLoadLists,
   loadTypeLibs,loadCompLibs,loadProject,
-  loadLibObj, dumpLibObj
+  loadLibObj, dumpLibObj,dumpPrettyLibObj
   )
 where
 
@@ -68,14 +68,21 @@ import System.FilePath.Windows
 import System.FilePath.Posix
 #endif
 import System.Directory
+import System.Exit
+
 import Control.Monad (foldM,liftM)
+import Control.Exception
+import Control.DeepSeq
 import Data.List
 import Data.Function (on)
-import Data.Text (Text,pack,unpack,splitOn)
-import Data.Text.Encoding (encodeUtf8,decodeUtf8)
-import qualified Data.ByteString as B
+import Data.Text (Text,pack,splitOn)
+import qualified Data.Text.Lazy as TL (pack,unpack)
+import Data.Text.Lazy.Encoding (encodeUtf8,decodeUtf8)
+import Text.Pretty.Simple
+import qualified Data.ByteString.Lazy as B
 
 import CoInSyDe.Core
+import CoInSyDe.Dictionary
 import CoInSyDe.Frontend
 import CoInSyDe.Frontend.XML ()
 import Text.XML.Light as XML (Element)
@@ -83,13 +90,15 @@ import Text.XML.Light as XML (Element)
 -- | Returns a path-wrapped frontend root node (e.g. XML root element). Should not be
 -- used alone, but within a @case@ block to avoid ambiguous instances.
 readLibDoc :: FNode f => FilePath -> IO f
-readLibDoc path = B.readFile path >>= return . readDoc path
+readLibDoc path = B.readFile path >>= return . readDoc
 
-buildLoadLists :: String
-               -> String
-               -> FilePath
+-- | Builds the path lists with all the library files used in loading the types,
+-- respectively component databases, according to the CoInSyDe library convention.
+buildLoadLists :: String  -- ^ target string
+               -> String  -- ^ system variable containing the @PATH@s
                -> IO ([FilePath],[FilePath])
-buildLoadLists target ldLibraryPath projFile = do
+               -- ^ load lists for @(types,components)@
+buildLoadLists target ldLibraryPath = do
   let libs = splitSearchPath ldLibraryPath
   allPaths <- mapM (liftM filterHidden . listDirAbs) libs
       -- select only the paths compatible to the target
@@ -102,8 +111,8 @@ buildLoadLists target ldLibraryPath projFile = do
       ordCpLib = (reverse . map (reverse . sortOn (length . getTrg))) compLibs
       -- further group based on "same target" for sanity checks. Flatten outer
       -- (by-library) grouping
-      grpTyLib = concatMap (groupBy ((==) `on` getTrg)) ordTyLib ++ [[projFile]]
-      grpCpLib = [projFile] : concatMap (groupBy ((==) `on` getTrg)) ordCpLib
+      grpTyLib = concatMap (groupBy ((==) `on` getTrg)) ordTyLib
+      grpCpLib = concatMap (groupBy ((==) `on` getTrg)) ordCpLib
   --  extract all IDs from the libraries
   tyNames <- (mapM . mapM) (pathToNameList ["type"]) grpTyLib
   cpNames <- (mapM . mapM) (pathToNameList ["template","native"]) grpCpLib
@@ -144,59 +153,95 @@ pathToNameList what path =
 
 ---------------------------------------------------------------------
 
-loadTypeLibs :: Target l
-             => [FilePath]
-             -> IO (LdHistory (Type l))
-loadTypeLibs = foldM loadLib emptyHistory
+forceM :: (Monad m, NFData a) => m a -> m a
+forceM m = m >>= (return $!) . force
+
+catchL f l p = Control.Exception.catch (forceM $ f l p) handler
   where
-    loadLib lib path = case takeExtension path of
+    handler :: SomeException -> IO a
+    handler e = die $ "Exception when loading file " ++ show p ++ ":\n" ++ show e
+    
+-- | Reads the content of the given files into a database of target-relevant types.
+--
+-- According to the library conventions, types are loaded from least to most specific
+-- library files, the last one being the project file itself. New entries override old
+-- ones with the same ID.
+loadTypeLibs :: Target l
+             => FilePath    -- ^ main project file
+             -> [FilePath]  -- ^ ordered list of load paths. See 'buildLoadLists'
+             -> IO (Dict (Type l))
+loadTypeLibs projF paths = foldM (catchL load) emptyDict paths >>=
+                           \lib -> catchL load lib projF
+  where
+    load lib path = case takeExtension path of
       ".xml" -> do
         xml <- readLibDoc path :: IO XML.Element
         return $ mkTypeLib lib path xml
       _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
 
+-- | Reads the content of the given files into a database of target-relevant
+-- components.
+--
+-- According to the library conventions, components are loaded from most to least
+-- specific library files, the first one being the project file itself. New entries of
+-- existing components are completely ignored (lazily).
 loadCompLibs :: Target l
-             => Dict (Type l)
-             -> [FilePath]
-             -> IO (LdHistory (Comp l))
-loadCompLibs typeLib = foldM loadLib emptyHistory
+             => Dict (Type l)  -- ^ fully-loaded type database
+             -> FilePath       -- ^ main project file
+             -> [FilePath]     -- ^ ordered list of load paths. See 'buildLoadLists'
+             -> IO (Dict (Comp l))
+loadCompLibs typeLib projF paths = catchL load emptyDict projF >>=
+                                   \lib -> foldM (catchL load) lib paths
   where
     mkLib path = case snd (trgAndType path) of
       ".template" -> mkTemplateLib path
       ".native"   -> mkNativeLib path typeLib
-      x -> error $ "Fatal error: trying to load library of type " ++ show x
-    loadLib lib path = case takeExtension path of
+      _ ->  \l x  -> mkNativeLib path typeLib (mkTemplateLib path l x) x
+    load lib path = case takeExtension path of
       ".xml" -> do
         xml <- readLibDoc path :: IO XML.Element
         return $ mkLib path lib xml
       _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
 
+-- | Loads the final project components (i.e. @pattern@s and @composite@s) from the
+-- main project file, after the databases have been succesfully built.
 loadProject :: Target l
-            => l
-            -> Dict (Type l)
-            -> LdHistory (Comp l)
-            -> FilePath
-            -> IO (LdHistory (Comp l))
-loadProject lang typeLib compLibH path = 
-  case takeExtension path of
-    ".xml" -> do
-      xml <- readLibDoc path :: IO XML.Element
-      let plibH = mkPatternLib path typeLib compLibH xml
-          clibH = mkCompositeLib lang path typeLib plibH xml
-      return clibH
-    _ -> error $ "Cannot load project file " ++ show path
+            => l             -- ^ proxy type to determine target language
+            -> Dict (Type l) -- ^ fully-built type database
+            -> Dict (Comp l) -- ^ fully-built component database
+            -> FilePath      -- ^ path to main project file
+            -> IO (Dict (Comp l))
+loadProject lang typeLib = catchL load
+  where
+    load lib path = case takeExtension path of
+      ".xml" -> do
+        xml <- readLibDoc path :: IO XML.Element
+        let plib = mkPatternLib path typeLib lib xml
+            clib = mkCompositeLib lang path typeLib plib xml
+        return clib
+      _ -> error $ "Cannot load project file " ++ show path
 ---------------------------------------------------------------------
 
-
--- | Dumps the content of a built dictionary into an @objdump@ file. TODO: dump to binary.
+-- | Dumps the content of a built dictionary into an @objdump@ file. TODO: dump to
+-- binary.
 dumpLibObj :: Show a
            => FilePath  -- ^ dump directory
            -> a -> IO () 
-dumpLibObj path = B.writeFile path . encodeUtf8 . pack . show
+dumpLibObj path = B.writeFile path . encodeUtf8 . TL.pack . show
+
+-- | A prettier, human readable version of 'dumpLibObj'. The generated file __cannot
+-- be loaded__. Adds a @.dbg@ suffix, not to be confused with the normal @objdump@
+-- file.
+dumpPrettyLibObj :: Show a
+                 => FilePath  -- ^ dump directory
+                 -> a -> IO () 
+dumpPrettyLibObj path
+  = B.writeFile (path ++ ".dbg") . encodeUtf8 . pShowOpt
+    defaultOutputOptionsNoColor { outputOptionsIndentAmount = 2 }
 
 -- | Loads the content of a dictionary from an @objdump@ file. TODO: load from binary.
 loadLibObj :: Read b
            => FilePath  -- ^ load directory
            -> IO b
-loadLibObj path = liftM (read . unpack . decodeUtf8) (B.readFile path)  
+loadLibObj path = liftM (read . TL.unpack . decodeUtf8) (B.readFile path)  
 

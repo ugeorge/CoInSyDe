@@ -16,21 +16,21 @@ module CoInSyDe.Frontend.XML where
 import CoInSyDe.Frontend
 import Data.Text (pack)
 import Text.XML.Light
+import Control.Exception (throw)
+import Data.Maybe (fromMaybe)
 
 -- | XML 'Element' type from "Text.XML.Light".
 instance FNode Element where
-  txtContent     = pack . strContent
+  getInfo        = (++) "line ". maybe "_" show . elLine
+  getTxt         = pack . strContent
   getName        = qName . elName
   children str   = findChildren (qn str)
-  readDoc path d = case parseXMLDoc d of
-                     Nothing -> error $ "XML file '" ++ path ++ "' is empty!"
-                     Just r  -> r
+  readDoc        = fromMaybe (throw EmptyFile) . parseXMLDoc
   getAttr attr n =
     case findAttr (qn attr) n of
-      Just a -> Left $ pack a
-      Nothing -> Right $ "XML Line " ++ show (elLine n) ++
-                 ": Cannot find attribute '" ++ attr ++
-                 "' in node of type '" ++ qName (elName n) ++ "'!"
+      Just a -> Right $ pack a
+      Nothing -> Left $ "cannot find attribute " ++ show attr ++
+                 " in node of type " ++ show (getName n)
 
 qn name = blank_name {qName=name}
   

@@ -32,10 +32,12 @@ dependencies:
 - containers
 - parsec
 - prettyprinter
+- pretty-simple >= 3
 - filepath
 - bytestring >= 0.10
 - directory >= 1.2
 - binary
+- deepseq
 # when:
 # - condition: flag(dynamic)
 #   dependencies:
@@ -58,7 +60,6 @@ executables:
     - -with-rtsopts=-N
     dependencies:
     - coinsyde
-    - pretty-simple >= 3
 
 # tests:
 #   f2c-test:

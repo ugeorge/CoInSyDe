@@ -14,22 +14,35 @@
 module CoInSyDe.Frontend where
 
 import Data.Text (Text,pack)
-import Data.ByteString (ByteString)
+import Data.ByteString.Lazy (ByteString)
+import Control.Exception
+import Data.Typeable          (TypeRep, Typeable, typeRep)
+
+data FrontendException
+  = ParseException String String
+  | EmptyFile
+  deriving (Typeable)
+instance Exception FrontendException
+
+instance Show FrontendException where
+  show (ParseException info msg) = "Parse exception (" ++ info ++ "): " ++ msg
+  show EmptyFile = "Empty file!" 
 
 -- | This is a minimal implementation for a tree-like object parser. The only type
 -- needed to be wrapped is the node element specific to the frontend representation.
 class FNode f where
-  -- | Returns the root node from a document file. 'FilePath' passed for error message
-  -- only.
-  readDoc  :: FilePath -> ByteString -> f
+  -- | Returns the root node from a document file.
+  readDoc  :: ByteString -> f
   -- | Returns a list with all the child nodes with a certain name
   children :: String  -> f -> [f]
   -- | Get name
   getName :: f -> String
   -- | Returns either the value of a certain attribute or a specific error message.
-  getAttr  :: String -> f -> Either Text String
+  getAttr  :: String -> f -> Either String Text
   -- | Gets the text content from a node.
-  txtContent :: f -> Text
+  getTxt :: f -> Text
+  -- | Gets info about element as string
+  getInfo :: f -> String
 
 -- | Infix operator for 'children'.
 (|=) :: FNode f => f -> String -> [f]
@@ -38,15 +51,15 @@ node |= name = children name node
 -- | Maybe-wrapped infix operator for 'getAttr'.
 (@?) :: FNode f => f -> String -> Maybe Text
 node @? attr = case getAttr attr node of
-                 Left val -> Just val
-                 Right _  -> Nothing
+                 Right val -> Just val
+                 Left _    -> Nothing
 
--- | Unsafe infix operator for 'getAttr'. Throws a runtime error in case attribute not
+-- | Unsafe infix operator for 'getAttr'. Throws a 'ParseException' in case attribute not
 -- found.
 (@!) :: FNode f => f -> String -> Text
 node @! attr = case getAttr attr node of
-                 Left  val -> val
-                 Right msg -> error msg
+                 Right val -> val
+                 Left  msg -> throw (ParseException (getInfo node) msg)
 
 -- | Same as 'children', but looks for several node names instead of just one.
 childrenOf :: FNode f => [String] -> f -> [f]
@@ -55,15 +68,10 @@ childrenOf names node = concatMap (`children` node) names
 -- | Predicate function for testing if an atribute exists and has a certain value.
 hasValue :: FNode f => String -> String -> f -> Bool
 hasValue attr val node = case getAttr attr node of
-                           Left f  -> pack val == f
-                           Right _ -> False
+                           Right f -> pack val == f
+                           Left  _ -> False
 
 -- | Filters a list of node based on a 'hasValue' predicate.
 filterByAttr :: FNode f => String -> String -> [f] -> [f]
 filterByAttr attr val = filter (attr `hasValue` val)
 
-
--- -- | @allAttrOf el attr root@ returns a list with all values for attrigute @attr@
--- -- belonging to all children named @el@. Unsafe, assumes attributes exists already.
--- allAttrOf :: FNode f => String -> String -> f -> [Text]
--- allAttrOf el attr = map (@!=attr) . children el

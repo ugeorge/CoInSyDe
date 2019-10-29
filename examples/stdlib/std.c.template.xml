@@ -1,0 +1,23 @@
+<library name="standard" contains="type" target="c">
+    <template name="comb">
+	[|func|]
+    </template>
+    <template name="moore">
+	[|ns_func|]
+	[|od_func|]
+    </template>
+    <template name="+">
+	(| ret |) = (| arg1 |) + (| arg2 |);
+    </template>
+    <template name="id">
+	(| ret |) = (| arg |);
+    </template>
+    <template name="stdinRead">
+	<requirement include="stdio.h"/>
+	scanf("(| format |)", &(| in |));
+    </template>
+    <template name="stdoutWrite">
+	<requirement include="stdio.h"/>
+	printff("(| format |)", (| out|));
+    </template>
+</library>

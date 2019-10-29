@@ -15,12 +15,10 @@ module CoInSyDe.TTm (
   TTm(..), textToTm
   ) where
 
-import Control.Applicative hiding ((<|>),many)
+import Control.DeepSeq
 import Data.Char (isSpace)
 import Data.Text (Text,split,pack,strip)
 import Text.Parsec
-import Text.Parsec.Char
-import Text.Parsec.Combinator
 
 -- | Abstract terms to represent templates. The CoInSyDe template language consists in
 -- a list (i.e. a sequence) of 'TTm' terms.
@@ -33,6 +31,9 @@ data TTm = TCode Text            -- ^ target language code in textual format
          | TFun  Name [Keyword]  -- ^ placeholder for functional template
                                  --   identifier. Default expands to functional code.
          deriving (Show,Read)
+
+instance NFData TTm where
+  rnf _ = ()
 
 type Parser = Parsec Text [TTm]
 type Name = Text

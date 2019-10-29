@@ -1,18 +1,23 @@
+{-# LANGUAGE CPP #-}
 module F2C where
 
 import System.Console.GetOpt
 import System.Environment
 import System.Exit
-import System.FilePath
+#ifdef mingw32_HOST_OS
+import System.FilePath.Windows
+#else
+import System.FilePath.Posix
+#endif
 import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.IO
 
 import Control.Monad (when,liftM)
+import Control.Exception
 import Data.List
 import Data.Maybe
-import Text.Pretty.Simple (pHPrint)
 import Data.Text.Prettyprint.Doc
-import Data.Text.Prettyprint.Doc.Render.Text
+-- import Data.Text.Prettyprint.Doc.Render.Text
 
 import CoInSyDe.LibManage
 import CoInSyDe.Core
@@ -20,8 +25,8 @@ import CoInSyDe.Backend.C
 
 main = do
   cmd <- getArgs >>= parse
-  dHandle <- getDebugHandler cmd
-  when (isDebug cmd) $ hPrint dHandle cmd
+  initDebug cmd
+  pDebug cmd $ show cmd
   
   -- check if libraries already loaded
   let tyObjPath = objp cmd </> name cmd <.> target cmd <.> "type" <.> "objdump"
@@ -29,48 +34,38 @@ main = do
   isTyObj <- doesFileExist tyObjPath
   isCpObj <- doesFileExist cpObjPath
 
-  -- load types and components/templates libraries
-  ((tyHist,tyLib),(cpHist',cpLib')) <- case isTyObj && isCpObj && not (force cmd) of
+  -- load types and components libraries only if forced/needed
+  (tyLib,cpLib') <- case isTyObj && isCpObj && not (force cmd) of
     -- if already existing, load previously-built objdumps
     True  -> do
-      tyObj <- loadLibObj tyObjPath :: IO (LdHistory (Type C))
-      cpObj <- loadLibObj cpObjPath :: IO (LdHistory (Comp C))
+      tyObj <- loadLibObj tyObjPath :: IO (Dict (Type C))
+      cpObj <- loadLibObj cpObjPath :: IO (Dict (Comp C))
       return (tyObj,cpObj)
     -- if not, build libraries and put them in objdumps
     False -> do
-      (tyLdList,cpLdList) <- buildLoadLists (target cmd) (libs cmd) (infile cmd)
+      (tyLdList,cpLdList) <- buildLoadLists (target cmd) (libs cmd) 
 
       -- double check the load paths are correct
-      when (isDebug cmd) $ debugPrintLdPaths dHandle (libs cmd) tyLdList cpLdList
+      pDebug cmd $ "$COINSYDE_PATH = " ++  show (libs cmd)
+      pDebug cmd $ "** Loading type libs: " ++  show tyLdList
+      pDebug cmd $ "** Loading component libs: " ++  show cpLdList
 
-      tyObj <- loadTypeLibs tyLdList
-      cpObj <- loadCompLibs (snd tyObj) cpLdList
+      tyObj <- loadTypeLibs (infile cmd) tyLdList
+      cpObj <- loadCompLibs tyObj (infile cmd) cpLdList
+
+      -- dump the built databases. If debug, then pretty-dump
       createDirectoryIfMissing True (objp cmd)
-      dumpLibObj tyObjPath tyObj
-      dumpLibObj cpObjPath cpObj
+      (if isDebug cmd then dumpPrettyLibObj else dumpLibObj) tyObjPath tyObj
+      (if isDebug cmd then dumpPrettyLibObj else dumpLibObj) cpObjPath cpObj
+        
+      -- return for further use
       return (tyObj,cpObj)
       
   -- finally with all types and template libraries, load the C project
-  (cpHist,cpLib) <- loadProject C tyLib (cpHist',cpLib') (infile cmd)
+  cpLib <- loadProject C tyLib cpLib' (infile cmd)
 
-  -- double-check: pretty-print all loaded libraries
-  when (isDebug cmd) $ debugLoadedLibs dHandle tyLib tyHist cpLib' cpHist'
   return ()
-  where
-    debugPrintLdPaths handler ldPaths tyLdList cpLdList = do
-      hPutStrLn handler $ "$COINSYDE_PATH = " ++ ldPaths
-      hPutStrLn handler $ "** Loading type libs: " ++ show tyLdList
-      hPutStrLn handler $ "** Loading component libs: " ++ show cpLdList
-    debugLoadedLibs handler tyLib tyHist cpLib cpHist = do
-      pHPrint handler "\n*** LOADED TYPE LIBRARY ***\n"
-      pHPrint handler tyLib
-      pHPrint handler "\n*** LOADED TYPE HISTORY ***\n"
-      pHPrint handler tyHist
-      pHPrint handler "\n*** LOADED COMPONENT LIBRARY ***\n"
-      pHPrint handler cpLib
-      pHPrint handler "\n*** LOADED COMPONENT HISTORY ***\n"
-      pHPrint handler cpHist
-     
+      
 
 data Commands
   = CFlags { name   :: String
@@ -88,10 +83,20 @@ data Commands
 isDebug x = case debug x of
   Left False -> False
   _ -> True
-getDebugHandler x = case debug x of
-  Left False -> return stderr
-  Left True  -> return stdout
-  Right o    -> openFile o WriteMode
+
+initDebug x = when (isDebug x) $ init
+  where
+    init = case debug x of
+      Left False -> error "Impossible!"
+      Left True  -> return ()
+      Right o    -> writeFile o ""
+
+pDebug x = when (isDebug x) . debugOut
+  where
+    debugOut = case debug x of
+      Left False -> error "Impossible!"
+      Left True  -> putStrLn
+      Right o    -> appendFile o . (++"\n")
 
 data Flag
   -- control

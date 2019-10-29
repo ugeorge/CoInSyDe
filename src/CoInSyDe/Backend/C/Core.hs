@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies, OverloadedStrings, FlexibleInstances #-}
 ----------------------------------------------------------------------
 -- |
 -- Module      :  CoInSyDe.Core.C.Core
@@ -16,7 +16,10 @@ module CoInSyDe.Backend.C.Core where
 
 import CoInSyDe.Core
 import CoInSyDe.TTm
+import CoInSyDe.Dictionary
 import CoInSyDe.Frontend
+
+import Control.DeepSeq (NFData, rnf)
 import Data.Text (Text,pack,append,snoc)
 import Data.Text.Read
 import Data.Map.Lazy as M hiding (map,filter,take)
@@ -72,6 +75,27 @@ instance Target C where
   mkComposite _ node =
     map (TCode . pack . show) $ take (length $ node |= "instance") [1::Int ..]
 
+instance NFData (Type C) where
+  rnf (PrimTy n) = rnf n
+  rnf (BoolTy n t f) = rnf n `seq` rnf t `seq` rnf f
+  rnf (EnumTy n v) = rnf n `seq` rnf v
+  rnf (Struct n _) = rnf n 
+  rnf (Array n _ s) = rnf n `seq` rnf s
+  rnf _ = ()
+
+instance NFData (If C) where
+  rnf (Param n v)    = rnf n `seq` rnf v
+  rnf (LocVar n t v) = rnf n `seq` rnf t `seq` rnf v
+  rnf (GlobVar n t v) = rnf n `seq` rnf t `seq` rnf v
+  rnf (InArg n t v) = rnf n `seq` rnf t `seq` rnf v
+  rnf (RetArg n t) = rnf n `seq` rnf t 
+  rnf (Get n t v) = rnf n `seq` rnf t `seq` rnf v
+  rnf (Put n t v) = rnf n `seq` rnf t `seq` rnf v
+  -- rnf _ = ()
+
+instance NFData (Requ C) where
+  rnf (Include x) = rnf x
+
 ------ TYPE CONSTRUCTORS ------
 
 -- | Makes a 'PrimTy' from a node
@@ -100,7 +124,7 @@ mkEnumTy tName pNodes = EnumTy tName (map extract pNodes)
 -- > type[@name=*,@class="struct",@targetName=*]
 -- > + parameter[@name=*,@type=*,@?value=*]
 mkStruct tyLib tName pNodes = Struct tName (M.fromList $ map extract pNodes)
-  where extract n = (n @! "name", (tyLib ! (n @! "type"), n @? "value"))
+  where extract n = (n @! "name", (tyLib !* (n @! "type"), n @? "value"))
 
 -- | Makes an 'Array' from a node
 --
@@ -108,7 +132,7 @@ mkStruct tyLib tName pNodes = Struct tName (M.fromList $ map extract pNodes)
 -- > - parameter[@name="baseType",@value=*]
 -- > - parameter[@name="size",@value=*]
 mkArray tyLib tName pNodes = Array tName baseTy size
-  where baseTy  = tyLib ! getParam "baseType" pNodes
+  where baseTy  = tyLib !* getParam "baseType" pNodes
         size    = fst $ either error id $ decimal $ getParam "size" pNodes
 
 getParam name nodes = head (filterByAttr "name" name nodes) @! "value"
@@ -120,7 +144,7 @@ getParam name nodes = head (filterByAttr "name" name nodes) @! "value"
 -- > port[@class="iArg",@name=*,@type=*,@?value=*]
 mkInArg tyLib node = InArg name ty val
   where name = node @! "name"
-        ty   = tyLib ! (node @! "type")
+        ty   = tyLib !* (node @! "type")
         val  = node @? "value"
         
 -- | Makes a 'RetArg' from a node
@@ -128,7 +152,7 @@ mkInArg tyLib node = InArg name ty val
 -- > port[@class="oArg",@name=*,@type=*]
 mkRetArg tyLib node = RetArg name ty
   where name = node @! "name"
-        ty   = tyLib ! (node @! "type")
+        ty   = tyLib !* (node @! "type")
 
 -- | Makes a 'Get' from a node
 --
@@ -138,7 +162,7 @@ mkRetArg tyLib node = RetArg name ty
 -- template instance, by using bindings defined in a sibling @instance@ node.
 mkGet tyLib node = Get name ty val
   where name = node @! "name"
-        ty   = tyLib ! (node @! "type")
+        ty   = tyLib !* (node @! "type")
         val  = node @? "value"
 
 -- | Makes a 'Get' from a node
@@ -149,7 +173,7 @@ mkGet tyLib node = Get name ty val
 -- template instance, by using bindings defined in a sibling @instance@ node.
 mkPut tyLib node = Put name ty val
   where name = node @! "name"
-        ty   = tyLib ! (node @! "type")
+        ty   = tyLib !* (node @! "type")
         val  = node @? "value"
                
 -- | Makes a 'LocVar' from a node
@@ -157,7 +181,7 @@ mkPut tyLib node = Put name ty val
 -- > intern[@class="var",@name=*,@type=*,@?value=*]
 mkVar tyLib node = LocVar name ty val
   where name = node @! "name"
-        ty   = tyLib ! (node @! "type")
+        ty   = tyLib !* (node @! "type")
         val  = node @? "value"
 
 -- | Makes a 'GlobVar' from a node
@@ -165,7 +189,7 @@ mkVar tyLib node = LocVar name ty val
 -- > intern[@class="state",@name=*,@type=*,@value=*]
 mkState tyLib parentId node = GlobVar name ty val
   where name = (parentId `snoc` '_') `append` (node @! "name")
-        ty   = tyLib ! (node @! "type")
+        ty   = tyLib !* (node @! "type")
         val  = node @! "value"
 
 -- | Makes a 'Param' from a node
