@@ -208,7 +208,11 @@ isState _             = False
 isVariable LocVar{}   = True
 isVariable _          = False
 
+getTypeOf Param{} = Nothing
+getTypeOf interf  = Just $ glTy interf
+
 ------ SPECIFIC DICTIONARIES ------
+
 
 -- mkStateDict :: FNode n => Dict (Type C) -> n -> IfMap C
 -- mkStateDict tyLib root = M.fromList states

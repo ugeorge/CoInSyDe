@@ -17,7 +17,8 @@ import Control.Exception
 import Data.List
 import Data.Maybe
 import Data.Text.Prettyprint.Doc
--- import Data.Text.Prettyprint.Doc.Render.Text
+import Data.Text.Prettyprint.Doc.Render.Text
+
 
 import CoInSyDe.LibManage
 import CoInSyDe.Core
@@ -62,8 +63,15 @@ main = do
       return (tyObj,cpObj)
       
   -- finally with all types and template libraries, load the C project
-  cpLib <- loadProject C tyLib cpLib' (infile cmd)
+  (topIds,cpLib) <- loadProject C tyLib cpLib' (infile cmd)
 
+  let projs   = buildProjStructure cpLib topIds
+      dbgPath = objp cmd </> name cmd <.> target cmd <.> "project" <.> "objdump"
+  when (isDebug cmd) $ dumpPrettyLibObj dbgPath projs
+
+  -- renderIO handler $ layoutPretty (layout) $ generateCode xml
+  putDoc $ generateCode (head projs)
+  
   return ()
       
 

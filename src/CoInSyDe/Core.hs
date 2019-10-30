@@ -15,9 +15,10 @@
 -- "CoInSyDe.Frontend" API.
 ----------------------------------------------------------------------
 module CoInSyDe.Core (
-  Dict, Id, Name, IfMap, InstMap,
+  Dict, Db(..), Id, Name, IfMap, InstMap,
   Target(..), Comp(..), Instance(..),
-  mkTypeLib, mkNativeLib, mkTemplateLib, mkPatternLib, mkCompositeLib,
+  mkTypeLib, mkNativeLib, mkTemplateLib, mkPatternLib,
+  mkCompositeLib, getTopModules,
   -- * Only internal
 
   -- | These are exported only for documentation purpose. Not to be used as such.
@@ -37,6 +38,10 @@ import CoInSyDe.TTm
 
 type IfMap l    = Map Name (If l) -- ^ Alias for a if dictionary
 type InstMap l  = Map Name (Instance l)
+
+data Db l = Db {types :: Dict (Type l), comps :: Dict (Comp l)} deriving (Show)
+instance  Target l => NFData (Db l) where
+  rnf (Db t c) = rnf t `seq` rnf c 
 
 ------------- CORE TYPES -------------
 
@@ -89,7 +94,7 @@ instance  Target l => NFData (Comp l) where
 -- | Container used for storing a reference to a functional component. 
 data Instance l where
   Bind :: (Target l) =>
-          { theComp  :: Id      -- ^ functional component ID
+          { refId    :: Id      -- ^ functional component ID
           , inline   :: Bool    -- ^ True if expanded inline, False if abstracted away
           , bindings :: IfMap l -- ^ bindings between parent and component ports
           } -> Instance l
@@ -211,7 +216,7 @@ mkCompositeLib :: (Target l, FNode f)
                -> Dict (Comp l) -- ^ updated library of components
 mkCompositeLib lang fPath typeLib compLib = foldr load compLib . children "composite"
   where
-    load n lib
+    load n
       = let name    = n @! "name"
             interfs = mkIfDict typeLib name n
             reqmnts = mkRequirements n
@@ -221,7 +226,12 @@ mkCompositeLib lang fPath typeLib compLib = foldr load compLib . children "compo
                         tm -> textToTm (unpack name) tm
             info    = mkInfoNode fPath n
             newComp = TmComp name interfs reqmnts binds templ
-        in dictReplace name newComp info lib 
+        in dictReplace name newComp info
+
+getTopModules :: FNode f => String -> f -> [Id]
+getTopModules tName node = map (@!"name") tops
+  where tops = filterByAttr "type" tName $ node |= "composite"
+
 
 ------------- INTERNAL DICTIONARY BUILDERS -------------
 

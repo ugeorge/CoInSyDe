@@ -210,15 +210,17 @@ loadProject :: Target l
             -> Dict (Type l) -- ^ fully-built type database
             -> Dict (Comp l) -- ^ fully-built component database
             -> FilePath      -- ^ path to main project file
-            -> IO (Dict (Comp l))
-loadProject lang typeLib = catchL load
+            -> IO ([Id], Dict (Comp l))
+            -- ^ list with top module IDs along with the new component database
+loadProject lang tyLib = catchL load
   where
-    load lib path = case takeExtension path of
+    load cpLib path = case takeExtension path of
       ".xml" -> do
         xml <- readLibDoc path :: IO XML.Element
-        let plib = mkPatternLib path typeLib lib xml
-            clib = mkCompositeLib lang path typeLib plib xml
-        return clib
+        let cpLib1 = mkPatternLib path tyLib cpLib xml
+            cpLib2 = mkCompositeLib lang path tyLib cpLib1 xml
+            tops   = getTopModules "top" xml 
+        return (tops, cpLib2)
       _ -> error $ "Cannot load project file " ++ show path
 ---------------------------------------------------------------------
 

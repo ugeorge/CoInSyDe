@@ -21,7 +21,6 @@ data Info = Info {ldFile :: FilePath, ldInfo :: String} deriving (Show,Read)
 instance NFData Info where
   rnf _ = ()
 
-
 mkInfoNode :: FNode n => FilePath -> n -> Info
 mkInfoNode path n = Info path (getInfo n)
 
@@ -47,3 +46,9 @@ dictReplace name c info = insertWith f name (c,[info])
 dictKeep :: Id -> t -> Info -> Dict t -> Dict t
 dictKeep name c info = insertWith f name (c,[info])
   where f (_,newh) (a,oldh) = (a,oldh++newh)
+
+dictTransfer :: Typeable t => Id -> Dict t -> Dict t -> Dict t
+dictTransfer name src dst = insertWith (\_ a -> a) name entry dst
+  where entry = maybe (error msg) id (src !? name)
+        msg = "ID " ++ show name ++ " does not exist in the current database of type: "
+              ++ show (typeOf src)
