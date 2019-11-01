@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeFamilies, OverloadedStrings, FlexibleInstances #-}
+{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
 ----------------------------------------------------------------------
 -- |
 -- Module      :  CoInSyDe.Core.C.Core
@@ -19,6 +20,7 @@ import CoInSyDe.TTm
 import CoInSyDe.Dictionary
 import CoInSyDe.Frontend
 
+import GHC.Generics (Generic)
 import Control.DeepSeq (NFData, rnf)
 import Data.Text (Text,pack,append,snoc)
 import Data.Text.Read
@@ -29,69 +31,58 @@ import Data.Map.Lazy as M hiding (map,filter,take)
 -- 'Requ C'), by instantiating the 'Target' type class.
 data C = C
 
+data Value = NoVal
+           | Val Text   -- ^ initialization value in textual format
+           | Cons Name  -- ^ instance key in the component's 'InstMap'
+           deriving (Show, Read, Generic, NFData)
+
+
+-----------------------------------------------------------------
 instance Target C where
-  data Type C = PrimTy  {tyName :: Id} -- ^ primitive type
-              | EnumTy  {tyName :: Id, enumVals :: [(Text, Maybe Text)]}
-              | Struct  {tyName :: Id, sEntries :: Map Text (Type C)}
+  data Type C = PrimTy  {tyName :: Id} 
+              | EnumTy  {tyName :: Id, enumVals  :: [(Text, Maybe Text)]}
+              | Struct  {tyName :: Id, sEntries  :: Map Text (Type C)}
               | Array   {tyName :: Id, arrBaseTy :: Type C, arrSize :: Int}
-              | Foreign {tyName :: Id, tyRequ :: [Requ C], tyCons :: Maybe (Comp C)}
+              | Foreign {tyName :: Id, tyRequ    :: [Requ C]}
               | NoTy
-              deriving (Read, Show)
+              deriving (Read, Show, Eq, Generic, NFData)
   mkType _ typeLib node =
     case node @! "class" of
       "primitive" -> mkPrimTy targetName
-      "enum"   -> mkEnumTy targetName parameters
-      "struct" -> mkStruct typeLib targetName parameters
-      "array"  -> mkArray  typeLib targetName parameters
+      "enum"      -> mkEnumTy targetName parameters
+      "struct"    -> mkStruct typeLib targetName parameters
+      "array"     -> mkArray  typeLib targetName parameters
+      "foreign"   -> mkForeign targetName requirements
       x -> error $ "Type class " ++ show x ++ " is not recognized!"
-    where targetName = node @! "targetName"
-          parameters = node |= "parameter"
+    where targetName   = node @! "targetName"
+          parameters   = node |= "parameter"
+          requirements = node |= "requirement"
           
-  data If C = Param   {glName :: Text, paramVal :: Text}
-            | LocVar  {glName :: Text, glTy :: Type C, glVal    :: Maybe Text}
-            | GlobVar {glName :: Text, glTy :: Type C, stateVal :: Text} 
-            | InArg   {glName :: Text, glTy :: Type C, glVal    :: Maybe Text}
-            | RetArg  {glName :: Text, glTy :: Type C} 
-            | Get     {glName :: Text, glTy :: Type C, glVal    :: Maybe Text} 
-            | Put     {glName :: Text, glTy :: Type C, glVal    :: Maybe Text} 
-            deriving (Read, Show)
+  data If C = Macro   {ifName :: Id, macroVal :: Text}
+            | LocVar  {ifName :: Id, ifTy :: Type C, ifVal :: Value}
+            | GlobVar {ifName :: Id, ifTy :: Type C, ifVal :: Value} 
+            | InArg   {ifName :: Id, ifTy :: Type C, ifVal :: Value}
+            | RetArg  {ifName :: Id, ifTy :: Type C, ifVal :: Value} 
+            | Get     {ifName :: Id, ifTy :: Type C, ifVal :: Value, ifGlue :: Name} 
+            | Put     {ifName :: Id, ifTy :: Type C, ifVal :: Value, ifGlue :: Name} 
+            deriving (Read, Show, Generic, NFData)
   mkIf pId typeLib node =
     case (getName node, node @! "class") of
-      ("port","iArg")        -> mkInArg typeLib node
-      ("port","oArg")        -> mkRetArg typeLib node
-      ("port","get")         -> mkGet typeLib node
-      ("port","put")         -> mkPut typeLib node
-      ("intern","var")       -> mkVar typeLib node
-      ("intern","state")     -> mkState typeLib pId node
-      ("intern","parameter") -> mkParam node
+      ("port","iArg")    -> mkGeneric InArg  typeLib node
+      ("port","oArg")    -> mkGeneric RetArg typeLib node
+      ("intern","var")   -> mkGeneric LocVar typeLib node
+      ("port","get")     -> mkGlued Get typeLib node
+      ("port","put")     -> mkGlued Put typeLib node
+      ("intern","state") -> mkState typeLib pId node
+      ("intern","macro") -> mkParam node
       x -> error $ "Glue of type " ++ show x ++ " is not recognized!"
 
-  data Requ C = Include Text deriving (Read, Show, Eq)
+  data Requ C = Include Text deriving (Read, Show, Eq, Generic, NFData)
   mkRequ node = Include (node @! "include")
 
   mkComposite _ node =
     map (TCode . pack . show) $ take (length $ node |= "instance") [1::Int ..]
-
-instance NFData (Type C) where
-  rnf (PrimTy n) = rnf n
-  rnf (EnumTy n v) = rnf n `seq` rnf v
-  rnf (Struct n _) = rnf n 
-  rnf (Array n _ s) = rnf n `seq` rnf s
-  rnf (Foreign n r c) = rnf n `seq` rnf r `seq` rnf c
-  rnf _ = ()
-
-instance NFData (If C) where
-  rnf (Param n v)    = rnf n `seq` rnf v
-  rnf (LocVar n t v) = rnf n `seq` rnf t `seq` rnf v
-  rnf (GlobVar n t v) = rnf n `seq` rnf t `seq` rnf v
-  rnf (InArg n t v) = rnf n `seq` rnf t `seq` rnf v
-  rnf (RetArg n t) = rnf n `seq` rnf t 
-  rnf (Get n t v) = rnf n `seq` rnf t `seq` rnf v
-  rnf (Put n t v) = rnf n `seq` rnf t `seq` rnf v
-  -- rnf _ = ()
-
-instance NFData (Requ C) where
-  rnf (Include x) = rnf x
+-----------------------------------------------------------------
 
 ------ TYPE CONSTRUCTORS ------
 
@@ -123,54 +114,42 @@ mkArray tyLib tName pNodes = Array tName baseTy size
   where baseTy  = tyLib !* getParam "baseType" pNodes
         size    = fst $ either error id $ decimal $ getParam "size" pNodes
 
+-- | Makes a 'Foreign' type from a node
+--
+-- > type[@name=*,@class="foreign",@targetName=*]
+-- > + requirement[@include=*]
+mkForeign tName = Foreign tName . map mkRequ
+         
 getParam name nodes = head (filterByAttr "name" name nodes) @! "value"
 
 ------ INTERFACE CONSTRUCTORS ------
 
--- | Makes an 'InArg' from a node
+-- | Can make an 'InArg', 'RetArg', 'LocVar' respectively from
 --
--- > port[@class="iArg",@name=*,@type=*,@?value=*]
-mkInArg tyLib node = InArg name ty val
+-- > port[@class="iArg"|"oArg",@name=*,@type=*,@?value=*,@?constructor=*]
+--
+-- or
+--
+-- > intern[@class="var",@name=*,@type=*,@?value=*,@?constructor=*]
+mkGeneric cons tyLib node = cons name ty val
   where name = node @! "name"
         ty   = tyLib !* (node @! "type")
-        val  = node @? "value"
-        
--- | Makes a 'RetArg' from a node
---
--- > port[@class="oArg",@name=*,@type=*]
-mkRetArg tyLib node = RetArg name ty
-  where name = node @! "name"
-        ty   = tyLib !* (node @! "type")
+        val  = case (node @? "value", node @? "constructor") of
+                 (Nothing,Nothing) -> NoVal
+                 (Just a, Nothing) -> Val a
+                 (_, Just a)       -> Cons a
 
--- | Makes a 'Get' from a node
+-- | Can make a 'Get', 'Put' respectively from
 --
--- > port[@class="get",@name=*,@type=*,@?value=*]
---
--- The glue mechanism associated with this port will be instantiated as any other
--- template instance, by using bindings defined in a sibling @instance@ node.
-mkGet tyLib node = Get name ty val
+-- > port[@class="get"|"put",@name=*,@type=*,@mechanism=*,@?value=*,@?constructor=*]
+mkGlued cons tyLib node = cons name ty val glue
   where name = node @! "name"
         ty   = tyLib !* (node @! "type")
-        val  = node @? "value"
-
--- | Makes a 'Get' from a node
---
--- > port[@class="put",@name=*,@type=*,@?value=*]
---
--- The glue mechanism associated with this port will be instantiated as any other
--- template instance, by using bindings defined in a sibling @instance@ node.
-mkPut tyLib node = Put name ty val
-  where name = node @! "name"
-        ty   = tyLib !* (node @! "type")
-        val  = node @? "value"
-               
--- | Makes a 'LocVar' from a node
---
--- > intern[@class="var",@name=*,@type=*,@?value=*]
-mkVar tyLib node = LocVar name ty val
-  where name = node @! "name"
-        ty   = tyLib !* (node @! "type")
-        val  = node @? "value"
+        val  = case (node @? "value", node @? "constructor") of
+                 (Nothing,Nothing) -> NoVal
+                 (Just a, Nothing) -> Val a
+                 (_, Just a)       -> Cons a
+        glue = node @! "mechanism"
 
 -- | Makes a 'GlobVar' from a node
 --
@@ -178,46 +157,33 @@ mkVar tyLib node = LocVar name ty val
 mkState tyLib parentId node = GlobVar name ty val
   where name = (parentId `snoc` '_') `append` (node @! "name")
         ty   = tyLib !* (node @! "type")
-        val  = node @! "value"
+        val  = maybe NoVal Val $ node @? "value"
 
--- | Makes a 'Param' from a node
+-- | Makes a 'Macro' from a node
 --
--- > intern[@class="state",@name=*,@type=*,@value=*]
-mkParam node = Param name val
+-- > intern[@class="macro",@name=*,@value=*]
+mkParam node = Macro name val
   where name = node @! "name"
         val  = node @! "value"
 
-isInput InArg{}       = True
-isInput _             = False
-isOutput RetArg{}     = True
-isOutput _            = False
-isState GlobVar{}     = True
-isState _             = False
-isVariable LocVar{}   = True
-isVariable _          = False
 
-getTypeOf Param{} = Nothing
-getTypeOf interf  = Just $ glTy interf
+isPrimitive PrimTy{}  = True
+isPrimitive _         = False
+isForeign Foreign{}   = True
+isForeign _           = False
 
------- SPECIFIC DICTIONARIES ------
+isInput InArg{}     = True
+isInput _           = False
+isOutput RetArg{}   = True
+isOutput _          = False
+isState GlobVar{}   = True
+isState _           = False
+isVariable LocVar{} = True
+isVariable _        = False
+isMacro Macro{}     = True
+isMacro _           = False
 
 
--- mkStateDict :: FNode n => Dict (Type C) -> n -> IfMap C
--- mkStateDict tyLib root = M.fromList states
---   where
---     pNodes = concatMap groupByName $ childrenOf ["pattern","composite"] root
---     states = map mkStateVar $ filter (hasValue "class" "state" . snd) pNodes
---     -----------------------------------
---     groupByName n = map (\p-> (n @! "name", p)) (n |= "port")
---     mkStateVar (parentId, n) = let stVar = mkState tyLib parentId n
---                                in (glName stVar, stVar)
-
--- mkRequList :: Dict (Comp C) -> [Requ C]
--- mkRequList = nub . concatMap (reqs . snd) . M.toList
-
--- getInitVal node = case node |= "parameter" of
---                     []  -> Nothing
---                     [n] -> getParamVal "initValue" n
---                     _   -> error $ "Node " ++ show (node @! "name")
---                            ++ "cannot have multiple initial values!"
+getTypeOf Macro{} = Nothing
+getTypeOf interf  = Just $ ifTy interf
 

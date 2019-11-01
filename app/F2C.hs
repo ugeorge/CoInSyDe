@@ -19,7 +19,6 @@ import Data.Maybe
 import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Text
 
-
 import CoInSyDe.LibManage
 import CoInSyDe.Core
 import CoInSyDe.Backend.C
@@ -68,6 +67,7 @@ main = do
   let projs   = buildProjStructure cpLib topIds
       dbgPath = objp cmd </> name cmd <.> target cmd <.> "project" <.> "objdump"
   when (isDebug cmd) $ dumpPrettyLibObj dbgPath projs
+  
 
   -- renderIO handler $ layoutPretty (layout) $ generateCode xml
   putDoc $ generateCode (head projs)

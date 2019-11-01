@@ -28,8 +28,8 @@
     <!-- CUSTOM COMPOSITE FUNCTIONS -->
     <!-- Their instances imply scheduling -->
     <composite name="mainProcess" type="top" call="function">
-	<port name="i" class="get" type="Bool"/>
-	<port name="o" class="put" type="Int"/>
+	<port name="i" class="get" type="Bool" mechanism="in_Read"/>
+	<port name="o" class="put" type="Int" mechanism="out_Write"/>
 	<intern name="fromBool" class="var" type="Int"/>
 	<instance placeholder="1" component="preMoore" call="inline">
 	    <bind replace="i1" with="i"/>
@@ -39,11 +39,11 @@
 	    <bind replace="i1" with="fromBool"/>
 	    <bind replace="o1" with="o"/>
 	</instance>
-	<intern name="formatStr" class="parameter" value="%d"/>
-	<instance placeholder="i" component="stdinRead" call="inline">
+	<intern name="formatStr" class="macro" value="%d"/>
+	<instance placeholder="in_Read" component="stdinRead" call="inline">
 	    <bind replace="format" with="formatStr"/>
 	</instance>
-	<instance placeholder="o" component="stdoutWrite" call="inline">
+	<instance placeholder="out_Write" component="stdoutWrite" call="inline">
 	    <bind replace="format" with="formatStr"/>
 	</instance>
     </composite>

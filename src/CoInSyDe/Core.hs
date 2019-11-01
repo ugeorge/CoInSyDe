@@ -1,5 +1,5 @@
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE StandaloneDeriving, DeriveAnyClass, DeriveGeneric #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies, FlexibleContexts, OverloadedStrings #-}
 ----------------------------------------------------------------------
 -- |
@@ -15,7 +15,7 @@
 -- "CoInSyDe.Frontend" API.
 ----------------------------------------------------------------------
 module CoInSyDe.Core (
-  Dict, Db(..), Id, Name, IfMap, InstMap,
+  Dict, Id, Name, IfMap, InstMap,
   Target(..), Comp(..), Instance(..),
   mkTypeLib, mkNativeLib, mkTemplateLib, mkPatternLib,
   mkCompositeLib, getTopModules,
@@ -39,17 +39,15 @@ import CoInSyDe.TTm
 type IfMap l    = Map Name (If l) -- ^ Alias for a if dictionary
 type InstMap l  = Map Name (Instance l)
 
-data Db l = Db {types :: Dict (Type l), comps :: Dict (Comp l)} deriving (Show)
-instance  Target l => NFData (Db l) where
-  rnf (Db t c) = rnf t `seq` rnf c 
-
 ------------- CORE TYPES -------------
 
 -- | Class for providing a common API for different target languages, where @l@ is
 -- mainly a proxy type.
-class ( Typeable l, Show (If l), Read (If l), NFData (If l)
+class ( Typeable l
+      , Show (If l),   Read (If l),   NFData (If l)
       , Show (Type l), Read (Type l), NFData (Type l)
-      , Show (Requ l), Read (Requ l), NFData (Requ l)) => Target l where
+      , Show (Requ l), Read (Requ l), NFData (Requ l)
+      ) => Target l where
   -- | A set of data type definitions, relevant to the target language.
   data Type l :: * 
   -- | A set of interface definitions, relevant to the target language.
@@ -270,7 +268,7 @@ mkInstances parentIfs = M.fromList . map mkInst . children "instance"
 -- | Makes a dicionary of interfaces based on the name bindings infereed from all the
 -- child nodes
 --
--- > instance/bind[@replace=*,@with=*]
+-- > instance/bind[@replace=*,@with=*|@withValue=*]
 --
 -- The new if dictionary will contain the referred component's interface names but
 -- with the parent component's interface types.
