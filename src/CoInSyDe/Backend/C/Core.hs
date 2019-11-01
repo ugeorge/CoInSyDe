@@ -31,21 +31,18 @@ data C = C
 
 instance Target C where
   data Type C = PrimTy  {tyName :: Id} -- ^ primitive type
-              | BoolTy  {tyName :: Id, boolTrue :: Text, boolFalse :: Text}
               | EnumTy  {tyName :: Id, enumVals :: [(Text, Maybe Text)]}
-              | Struct  {tyName :: Id, sEntries :: Map Text (Type C, Maybe Text)}
+              | Struct  {tyName :: Id, sEntries :: Map Text (Type C)}
               | Array   {tyName :: Id, arrBaseTy :: Type C, arrSize :: Int}
-              -- | CircBuf {tyName :: Id, bufArr :: Type C,  bufPos :: Int}
+              | Foreign {tyName :: Id, tyRequ :: [Requ C], tyCons :: Maybe (Comp C)}
               | NoTy
-              deriving (Read, Show, Eq)                       
+              deriving (Read, Show)
   mkType _ typeLib node =
     case node @! "class" of
       "primitive" -> mkPrimTy targetName
-      "bool"   -> mkBoolTy targetName parameters
       "enum"   -> mkEnumTy targetName parameters
       "struct" -> mkStruct typeLib targetName parameters
       "array"  -> mkArray  typeLib targetName parameters
-      -- "circular_buffer" -> mkCircBuf targetName parameters
       x -> error $ "Type class " ++ show x ++ " is not recognized!"
     where targetName = node @! "targetName"
           parameters = node |= "parameter"
@@ -77,10 +74,10 @@ instance Target C where
 
 instance NFData (Type C) where
   rnf (PrimTy n) = rnf n
-  rnf (BoolTy n t f) = rnf n `seq` rnf t `seq` rnf f
   rnf (EnumTy n v) = rnf n `seq` rnf v
   rnf (Struct n _) = rnf n 
   rnf (Array n _ s) = rnf n `seq` rnf s
+  rnf (Foreign n r c) = rnf n `seq` rnf r `seq` rnf c
   rnf _ = ()
 
 instance NFData (If C) where
@@ -103,15 +100,6 @@ instance NFData (Requ C) where
 -- > type[@name=*,@class="primitive",@targetName=*]
 mkPrimTy = PrimTy
 
--- | Makes a 'BoolTy' from a node
---
--- > type[@name=*,@class="bool",@targetName=*]
--- > - parameter[@name="true",@value=*]
--- > - parameter[@name="false",@value=*]
-mkBoolTy tName pNodes = BoolTy tName true false
-  where true  = getParam "true" pNodes
-        false = getParam "false" pNodes
-
 -- | Makes a 'EnumTy' from a node
 --
 -- > type[@name=*,@class="enum",@targetName=*]
@@ -122,9 +110,9 @@ mkEnumTy tName pNodes = EnumTy tName (map extract pNodes)
 -- | Makes a 'Struct' from a node
 --
 -- > type[@name=*,@class="struct",@targetName=*]
--- > + parameter[@name=*,@type=*,@?value=*]
+-- > + parameter[@name=*,@type=*]
 mkStruct tyLib tName pNodes = Struct tName (M.fromList $ map extract pNodes)
-  where extract n = (n @! "name", (tyLib !* (n @! "type"), n @? "value"))
+  where extract n = (n @! "name", tyLib !* (n @! "type"))
 
 -- | Makes an 'Array' from a node
 --

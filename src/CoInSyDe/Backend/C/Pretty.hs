@@ -52,11 +52,11 @@ pTyDecl t = error $ "Code generation for type " ++ show t ++ " is not supported!
 -- variable code generators
 -------------------------------
 
-genVarDecl (Var nm _ ty _) =
-  pretty (tyName ty) <+> pretty nm 
-genVarInit (Var nm _ _ (Just vl)) =
-  pretty nm <+> equals <+> pretty vl  
-genVarDeclInit (Var nm _ ty (Just vl)) =
-  pretty (tyName ty) <+> pretty nm <+> equals <+> pretty vl 
-genVarDeclInit (Var nm _ ty Nothing)   =
-  pretty (tyName ty) <+> pretty nm 
+-- genVarDecl (Var nm _ ty _) =
+--   pretty (tyName ty) <+> pretty nm 
+-- genVarInit (Var nm _ _ (Just vl)) =
+--   pretty nm <+> equals <+> pretty vl  
+-- genVarDeclInit (Var nm _ ty (Just vl)) =
+--   pretty (tyName ty) <+> pretty nm <+> equals <+> pretty vl 
+-- genVarDeclInit (Var nm _ ty Nothing)   =
+--   pretty (tyName ty) <+> pretty nm 

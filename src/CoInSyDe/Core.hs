@@ -47,7 +47,7 @@ instance  Target l => NFData (Db l) where
 
 -- | Class for providing a common API for different target languages, where @l@ is
 -- mainly a proxy type.
-class ( Typeable l, Show (If l),   Read (If l),   NFData (If l)
+class ( Typeable l, Show (If l), Read (If l), NFData (If l)
       , Show (Type l), Read (Type l), NFData (Type l)
       , Show (Requ l), Read (Requ l), NFData (Requ l)) => Target l where
   -- | A set of data type definitions, relevant to the target language.
