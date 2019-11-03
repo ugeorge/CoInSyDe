@@ -82,7 +82,7 @@ import Text.Pretty.Simple
 import qualified Data.ByteString.Lazy as B
 
 import CoInSyDe.Core
-import CoInSyDe.Dictionary
+import CoInSyDe.Core.Dict
 import CoInSyDe.Frontend
 import CoInSyDe.Frontend.XML ()
 import Text.XML.Light as XML (Element)

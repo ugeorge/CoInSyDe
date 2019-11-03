@@ -1,5 +1,5 @@
 module CoInSyDe.Backend.C (
-  module CoInSyDe.Backend.C.Core,
+  C(..),
   module CoInSyDe.Backend.C.Proj,
   module CoInSyDe.Backend.C.Chain
   ) where

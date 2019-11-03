@@ -2,7 +2,7 @@
 {-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
 ----------------------------------------------------------------------
 -- |
--- Module      :  CoInSyDe.Core.C.Core
+-- Module      :  CoInSyDe.Backend.C.Core
 -- Copyright   :  (c) George Ungureanu, 2019
 -- License     :  BSD-style (see the file LICENSE)
 -- 
@@ -13,15 +13,25 @@
 -- This module contains the core types specific to the family of C-based tagets, and
 -- their constructors.
 ----------------------------------------------------------------------
-module CoInSyDe.Backend.C.Core where
+module CoInSyDe.Backend.C.Core (
+  C(..), Type(..), If(..), Requ(..), Value(..),
+  -- * 'Type' constructors
+  mkPrimTy, mkEnumTy, mkStruct, mkArray, mkForeign,
+  -- * 'If' (interface) constructors
+  mkGeneric, mkGlued, mkState, mkParam,
+  -- * Utilities
+  isPrimitive,isForeign,isVoid,
+  isInput,isOutput,isState,isVar,isMacro,isGet,isPut,
+  getTypeOf,getOutput
+  ) where
 
 import CoInSyDe.Core
-import CoInSyDe.TTm
-import CoInSyDe.Dictionary
+import CoInSyDe.Core.TTm
+import CoInSyDe.Core.Dict
 import CoInSyDe.Frontend
 
 import GHC.Generics (Generic)
-import Control.DeepSeq (NFData, rnf)
+import Control.DeepSeq (NFData)
 import Data.Text (Text,pack,unpack,append,snoc)
 import Data.Text.Read
 import Data.Map.Lazy as M hiding (map,filter,take)
@@ -33,9 +43,11 @@ import Data.Maybe
 -- 'Requ C'), by instantiating the 'Target' type class.
 data C = C
 
-data Value = NoVal
+-- | Captures the different kinds of syntax used for initializing variables. 
+data Value = NoVal      -- ^ no initialization
            | Val Text   -- ^ initialization value in textual format
-           | Cons Name  -- ^ instance key in the component's 'InstMap'
+           | Cons Name  -- ^ points to constructor referenced in the parent
+                        -- component's 'InstMap'
            deriving (Show, Read, Generic, NFData)
 
 
@@ -46,7 +58,7 @@ instance Target C where
               | Struct  {tyName :: Id, sEntries  :: Map Text (Type C)}
               | Array   {tyName :: Id, arrBaseTy :: Type C, arrSize :: Int}
               | Foreign {tyName :: Id, tyRequ    :: [Requ C]}
-              | NoTy    {tyName :: Id} -- void
+              | NoTy    {tyName :: Id} -- ^ will always be void
               deriving (Read, Show, Eq, Generic, NFData)
   mkType _ typeLib node =
     case node @! "class" of
@@ -90,10 +102,11 @@ instance Target C where
 
 ------ TYPE CONSTRUCTORS ------
 
--- | Makes a 'PrimTy' from a node
+-- | Makes a 'PrimTy' or 'NoTy' (void) from a node
 --
 -- > type[@name=*,@class="primitive",@targetName=*]
-mkPrimTy = PrimTy
+mkPrimTy "void" = NoTy "void"
+mkPrimTy tName  = PrimTy tName
 
 -- | Makes a 'EnumTy' from a node
 --
@@ -143,7 +156,7 @@ mkGeneric cons tyLib node = cons name ty val
                  (Just a, Nothing) -> Val a
                  (_, Just a)       -> Cons a
 
--- | Can make a 'Get', 'Put' respectively from
+-- | Can make a 'Get' or 'Put' respectively from
 --
 -- > port[@class="get"|"put",@name=*,@type=*,@mechanism=*,@?value=*,@?constructor=*]
 mkGlued cons tyLib node = cons name ty val glue
@@ -197,6 +210,8 @@ isPut _           = False
 getTypeOf Macro{} = Nothing
 getTypeOf interf  = Just $ ifTy interf
 
+-- | Assures that a component has at most one 'RetArg'. If none is found, it creates a
+-- @void@ 'RetArg', used in function definition headers.
 getOutput n ps = case filter isOutput ps of
                    []  -> RetArg {ifName = "__OUT_",
                                   ifTy   = NoTy "void",

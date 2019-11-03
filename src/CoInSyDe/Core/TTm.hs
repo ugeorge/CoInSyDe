@@ -1,6 +1,6 @@
 ----------------------------------------------------------------------
 -- |
--- Module      :  CoInSyDe.TTmParse
+-- Module      :  CoInSyDe.Core.TTm
 -- Copyright   :  (c) George Ungureanu, 2019
 -- License     :  BSD-style (see the file LICENSE)
 -- 
@@ -11,8 +11,8 @@
 -- This module contains the CoInSyDe template language and the
 -- template language parser.
 ----------------------------------------------------------------------
-module CoInSyDe.TTm (
-  TTm(..), textToTm
+module CoInSyDe.Core.TTm (
+  Name, Keyword, TTm(..), textToTm
   ) where
 
 import Control.DeepSeq
@@ -25,7 +25,7 @@ import Text.Parsec
 --
 -- The list of 'Keyword's following 'TPort' and 'TFun' are queries telling CoInSyDe to
 -- expand specific info. If the list is empty than the default expansion occurs.
-data TTm = TCode Text            -- ^ target language code in textual format
+data TTm = TCode Text            -- ^ target language code in text format
          | TPort Name [Keyword]  -- ^ placeholder for port identifier. Default expands
                                  --   to port name.
          | TFun  Name [Keyword]  -- ^ placeholder for functional template
@@ -36,8 +36,8 @@ instance NFData TTm where
   rnf _ = ()
 
 type Parser = Parsec Text [TTm]
-type Name = Text
-type Keyword = String
+type Name    = Text   -- ^ Generic name found in templates.
+type Keyword = String -- ^ A "reserved" keyword used in template identifiers.
 
 -- | Parses text to a list of CoInSyDe template terms.
 textToTm name = getTempl . runParser parseText [] name

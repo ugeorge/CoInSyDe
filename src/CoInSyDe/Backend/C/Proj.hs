@@ -1,3 +1,16 @@
+----------------------------------------------------------------------
+-- |
+-- Module      :  CoInSyDe.Backend.C.Proj
+-- Copyright   :  (c) George Ungureanu, 2019
+-- License     :  BSD-style (see the file LICENSE)
+-- 
+-- Maintainer  :  ugeorge@kth.se
+-- Stability   :  experimental
+-- Portability :  portable
+--
+-- Defines a record of different containers built specifically for a C project, having
+-- only the information necessary to simplify code generation and pretty printing.
+----------------------------------------------------------------------
 module CoInSyDe.Backend.C.Proj (
   Proj(..), buildProjStructure
   ) where
@@ -7,26 +20,34 @@ import Data.Map.Lazy as M
 import Data.Text     as T
 import Data.Maybe    as J
 
-import CoInSyDe.Dictionary
 import CoInSyDe.Core
+import CoInSyDe.Core.Dict
 import CoInSyDe.Backend.C.Core
 
--- TODO: Monad instance; monadic generation during a single traversal.
-data Proj = Proj { welcome  :: Text
-                 , top      :: Comp C
-                 , funDecls :: [Id]
-                 , requmnts :: [Requ C]
-                 , globVars :: IfMap C
-                 , allTypes :: [Type C]
+-- | Structure for a C project.
+--
+-- TODO: should be part of a Writer-like monad, for more maintainable code generation
+-- and error messages!
+data Proj = Proj { welcome  :: Text     -- ^ greeter message
+                 , mainFun  :: Id       -- ^ top module 'Id'
+                 , funDecls :: [Id]     -- ^ functions that need to be declared
+                 , requmnts :: [Requ C] -- ^ set of requirements
+                 , globVars :: IfMap C  -- ^ set of global variables
+                 , allTypes :: [Type C] -- ^ set of types used
                  , allFuncs :: Dict (Comp C)
+                 -- ^ dictionary with only the components used in building the
+                 -- executable for 'mainFun'.
                  } deriving (Show)
 
 greet = pack "// Generated with CoInSyDe : Code Synthesizer for System Design //"
 
 emptyProj top = Proj greet top [] [] M.empty [] emptyDict
 
-buildProjStructure :: Dict (Comp C) -> [Id] -> [Proj]
-buildProjStructure db = L.map (\n -> updateProj db (db !* n) (emptyProj (db !* n)))
+-- | Builds a list of 'Proj' structure for each top module declared.
+buildProjStructure :: Dict (Comp C) -- ^ the /complete/ component database
+                   -> [Id]   -- ^ list with top module 'Id's
+                   -> [Proj]
+buildProjStructure db = L.map (\n -> updateProj db (db !* n) (emptyProj n))
 
 traverseProj :: Dict (Comp C) -> Comp C -> Proj -> Proj
 traverseProj db cp@NvComp{} proj = updateProj db cp proj
@@ -51,6 +72,7 @@ updateProj db cp proj =
     newReqmnts  = nub $ requmnts proj ++ reqs cp ++
                   L.concatMap tyRequ (L.filter isForeign currTypes)
     -- only states are allowed to be declared as global variables
+    -- TODO: multiple instances !!!!!
     newGlobVars = M.unionWithKey (\k _ _ -> error $ errGlob k)
                   (globVars proj) (M.filter isState $ ifs cp)
     -- only non-foreign types need to be declared

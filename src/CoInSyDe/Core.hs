@@ -30,9 +30,9 @@ import Data.Text as T (Text,unpack,strip)
 import Data.Map.Lazy as M hiding (map,foldr,filter)
 import Control.DeepSeq
 
-import CoInSyDe.Dictionary
 import CoInSyDe.Frontend
-import CoInSyDe.TTm
+import CoInSyDe.Core.Dict
+import CoInSyDe.Core.TTm
 
 ------------- ALIASES -------------
 
@@ -67,27 +67,26 @@ class ( Typeable l
 data Comp l where
   -- | Template functional. Contains template code managed by CoInSyDe
   TmComp :: Target l =>
-           { funName  :: Id       -- ^ unique function ID
-           , ifs      :: IfMap l  -- ^ maps user port names to interface containers
-           , reqs     :: [Requ l] -- ^ special requirements
-           , refs     :: InstMap l-- ^ maps a template functional identifier 'TFun' to
-                                  -- an existing (parsed) functional 'Comp', along
-                                  -- with its new port bindings
-           , template :: [TTm]    -- ^ list of template terms
+           { funName  :: Id       -- ^ unique component ID
+           , ifs      :: IfMap l  -- ^ maps (template) names to component interfaces
+           , reqs     :: [Requ l] -- ^ special requirements for component
+           , refs     :: InstMap l-- ^ maps a (template) function placeholder 'TFun'
+                                  --   to an existing component, along with its new
+                                  --   interface bindings
+           , template :: [TTm]    -- ^ template code
            } -> Comp l
   -- | Native functional. Code used \"as-is\", no manipulation done.
   NvComp :: Target l =>
-           { funName :: Id         -- ^ unique function ID
-           , ifs     :: IfMap l    -- ^ maps user port names to interface containers
-           , reqs    :: [Requ l]   -- ^ special requirements
-           , funCode :: Maybe Text -- ^ points to/contains native code
+           { funName :: Id         -- ^ unique component ID
+           , ifs     :: IfMap l    -- ^ maps port names to (caller) interfaces
+           , reqs    :: [Requ l]   -- ^ special requirements for component
+           , funCode :: Maybe Text -- ^ maybe native code
            } -> Comp l
 deriving instance Target l => Show (Comp l)
 deriving instance Target l => Read (Comp l)
 instance  Target l => NFData (Comp l) where
   rnf (TmComp n i r f t) = rnf n `seq` rnf i `seq` rnf r `seq` rnf f `seq` rnf t
   rnf (NvComp n i r f) = rnf n `seq` rnf i `seq` rnf r `seq` rnf f
-
 
 -- | Container used for storing a reference to a functional component. 
 data Instance l where
@@ -126,8 +125,8 @@ mkTypeLib tyLib fPath = foldr load tyLib . children "type"
 --  > <root>/native[@name=*]CTEXT?
 -- 
 -- These nodes /might/ contain a @CTEXT@ field with the source code for the native
--- function. If it does not, then a @requirement@ child node pointing to the library
--- file where the function is defined is necessary.
+-- function. If it does not, then a @requirement@ child node pointing to the header
+-- where the function is defined is necessary.
 --
 -- Does __not__ replace entry if ID exists, see "CoInSyDe.LibManage" for load scheme.
 mkNativeLib :: (Target l, FNode f)
@@ -202,9 +201,12 @@ mkPatternLib fPath typeLib compLib = foldr load compLib . children "pattern"
 --
 --  > <root>/composite[@name=*,@type=*]CTEXT?
 -- 
--- __OBS:__ Patterns are usually found in project files, and require that all template
--- libraries have been fully loaded. Replaces any previously-loaded component with the
--- same name. TODO: is this right, or should it throw error?
+-- The @CTEXT@ might be template code, see 'TTm', in which case it overrides the
+-- default composite code template of the target language.
+--
+-- __OBS:__ Composites are usually found in project files, and require that all
+-- template libraries have been fully loaded. Replaces any previously-loaded component
+-- with the same name. TODO: is this right, or should it throw error?
 mkCompositeLib :: (Target l, FNode f)
                => l             -- ^ proxy to determine language
                -> FilePath      -- ^ file being loaded, for history bookkeeping
@@ -235,7 +237,7 @@ getTopModules tName node = map (@!"name") tops
 
 -- | Makes a dictionary of interfaces operations from all the child nodes
 --
--- > <parent>/interface[@name=*]
+-- > <parent>/port|intern[@name=*]
 --
 -- Uses 'mkIf' from the 'Target' API.
 mkIfDict :: (Target l, FNode f)
@@ -268,7 +270,7 @@ mkInstances parentIfs = M.fromList . map mkInst . children "instance"
 -- | Makes a dicionary of interfaces based on the name bindings infereed from all the
 -- child nodes
 --
--- > instance/bind[@replace=*,@with=*|@withValue=*]
+-- > instance/bind[@replace=*,@with=*]
 --
 -- The new if dictionary will contain the referred component's interface names but
 -- with the parent component's interface types.

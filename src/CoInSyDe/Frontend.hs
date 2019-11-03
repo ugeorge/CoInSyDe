@@ -16,10 +16,11 @@ module CoInSyDe.Frontend where
 import Data.Text (Text,pack)
 import Data.ByteString.Lazy (ByteString)
 import Control.Exception
-import Data.Typeable          (TypeRep, Typeable, typeRep)
+import Data.Typeable (Typeable)
 
+-- | Exceptions for more meaningful frontend-related error messages.
 data FrontendException
-  = ParseException String String
+  = ParseException String String -- ^ Contains parser info + custom message
   | EmptyFile
   deriving (Typeable)
 instance Exception FrontendException

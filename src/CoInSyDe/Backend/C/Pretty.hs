@@ -1,13 +1,12 @@
 module CoInSyDe.Backend.C.Pretty where
 
 import CoInSyDe.Core
-import CoInSyDe.TTm
-import CoInSyDe.Dictionary
+import CoInSyDe.Core.Dict
+import CoInSyDe.Core.TTm
 import CoInSyDe.Backend.C.Core
 
 import qualified Data.Map.Lazy as M
 import Data.Text.Prettyprint.Doc 
-import Data.List (intercalate)
 
 type CDoc = Doc ()
 
