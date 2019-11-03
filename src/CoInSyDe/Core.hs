@@ -219,7 +219,7 @@ mkCompositeLib lang fPath typeLib compLib = foldr load compLib . children "compo
             interfs = mkIfDict typeLib name n
             reqmnts = mkRequirements n
             binds   = mkInstances interfs n
-            templ   = case getTxt n of
+            templ   = case strip $ getTxt n of
                         "" -> mkComposite lang n
                         tm -> textToTm (unpack name) tm
             info    = mkInfoNode fPath n

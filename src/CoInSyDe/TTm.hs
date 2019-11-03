@@ -17,7 +17,7 @@ module CoInSyDe.TTm (
 
 import Control.DeepSeq
 import Data.Char (isSpace)
-import Data.Text (Text,split,pack,strip)
+import Data.Text (Text,split,pack,unpack,strip)
 import Text.Parsec
 
 -- | Abstract terms to represent templates. The CoInSyDe template language consists in
@@ -37,7 +37,7 @@ instance NFData TTm where
 
 type Parser = Parsec Text [TTm]
 type Name = Text
-type Keyword = Text
+type Keyword = String
 
 -- | Parses text to a list of CoInSyDe template terms.
 textToTm name = getTempl . runParser parseText [] name
@@ -67,7 +67,7 @@ funTm :: Parser TTm
 funTm = mkQuery TFun <$> between (symbol "[|") (symbol "|]") identity
 
 mkQuery c tx = let l = split (=='.') (pack tx)
-               in  c (head l) (tail l)
+               in  c (head l) (map unpack $ tail l)
 
 --------------------------------------------------
 

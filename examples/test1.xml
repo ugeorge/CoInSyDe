@@ -41,10 +41,12 @@
 	</instance>
 	<intern name="formatStr" class="macro" value="%d"/>
 	<instance placeholder="in_Read" component="stdinRead" call="inline">
+	    <bind replace="in" with="i"/>
 	    <bind replace="format" with="formatStr"/>
 	</instance>
 	<instance placeholder="out_Write" component="stdoutWrite" call="inline">
 	    <bind replace="format" with="formatStr"/>
+	    <bind replace="out" with="o"/>
 	</instance>
     </composite>
 

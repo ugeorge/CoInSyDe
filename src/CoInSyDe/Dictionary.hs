@@ -1,6 +1,7 @@
 module CoInSyDe.Dictionary where
 
 import Data.Typeable
+import Data.Maybe(fromMaybe)
 import Control.DeepSeq
 import Data.Text as T (Text)
 import Data.Map.Lazy as M hiding (map,foldr,filter)
@@ -24,17 +25,16 @@ instance NFData Info where
 mkInfoNode :: FNode n => FilePath -> n -> Info
 mkInfoNode path n = Info path (getInfo n)
 
-infixl 9 !*, !^
+infixl 9 !*, !^, !?!
 
 (!*) :: Typeable t => Dict t -> Id -> t
-(!*) d k = fst $  maybe (error msg) id (d !? k)
-  where msg = "ID " ++ show k ++ " does not exist in the current database of type: "
-              ++ show (typeOf d)
+(!*) d k = fst $ fromMaybe (error $ dictErr k d) (d !? k)
 
 (!^) :: Typeable t => Dict t -> Id -> History
-(!^) d k = snd $  maybe (error msg) id (d !? k)
-  where msg = "ID " ++ show k ++ " does not exist in the current database of type: "
-              ++ show (typeOf d)
+(!^) d k = snd $  fromMaybe (error $ dictErr k d) (d !? k)
+
+(!?!) :: (Show t, Typeable k, Ord k, Show k) => Map k t -> k -> t
+(!?!) d k = fromMaybe (error $ dictErr1 k d) (d !? k)
 
 mkDict :: [(Id, t, History)] -> Dict t
 mkDict = M.fromList . map (\(i,c,h) -> (i,(c,h)))
@@ -48,7 +48,11 @@ dictKeep name c info = insertWith f name (c,[info])
   where f (_,newh) (a,oldh) = (a,oldh++newh)
 
 dictTransfer :: Typeable t => Id -> Dict t -> Dict t -> Dict t
-dictTransfer name src dst = insertWith (\_ a -> a) name entry dst
-  where entry = maybe (error msg) id (src !? name)
-        msg = "ID " ++ show name ++ " does not exist in the current database of type: "
-              ++ show (typeOf src)
+dictTransfer name src = insertWith (\_ a -> a) name entry
+  where entry = fromMaybe (error $ dictErr name src) (src !? name)
+
+dictErr k d = "ID " ++ show k ++ " does not exist in the database of type: "
+              ++ show (typeOf d)
+dictErr1 k d = "ID " ++ show k ++ " does not exist in the database of type: "
+              ++ show d
+

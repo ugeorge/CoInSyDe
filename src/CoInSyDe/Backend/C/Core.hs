@@ -22,10 +22,12 @@ import CoInSyDe.Frontend
 
 import GHC.Generics (Generic)
 import Control.DeepSeq (NFData, rnf)
-import Data.Text (Text,pack,append,snoc)
+import Data.Text (Text,pack,unpack,append,snoc)
 import Data.Text.Read
 import Data.Map.Lazy as M hiding (map,filter,take)
 
+import Text.Read
+import Data.Maybe
 -- | Defines the family of C target languages. In particular it defines a set of types
 -- (see 'Type C'), a set of interfaces (see 'If C') and a set of requirements (see
 -- 'Requ C'), by instantiating the 'Target' type class.
@@ -44,7 +46,7 @@ instance Target C where
               | Struct  {tyName :: Id, sEntries  :: Map Text (Type C)}
               | Array   {tyName :: Id, arrBaseTy :: Type C, arrSize :: Int}
               | Foreign {tyName :: Id, tyRequ    :: [Requ C]}
-              | NoTy
+              | NoTy    {tyName :: Id} -- void
               deriving (Read, Show, Eq, Generic, NFData)
   mkType _ typeLib node =
     case node @! "class" of
@@ -80,8 +82,10 @@ instance Target C where
   data Requ C = Include Text deriving (Read, Show, Eq, Generic, NFData)
   mkRequ node = Include (node @! "include")
 
+    -- todo HACK!!
   mkComposite _ node =
-    map (TCode . pack . show) $ take (length $ node |= "instance") [1::Int ..]
+    map ((\x -> TFun x []) . pack . show) $ take (length $ insts) [1::Int ..]
+    where insts = filter (\x -> isJust (readMaybe (unpack $ x@!"placeholder") :: Maybe Int)) $ node |= "instance"
 -----------------------------------------------------------------
 
 ------ TYPE CONSTRUCTORS ------
@@ -171,19 +175,32 @@ isPrimitive PrimTy{}  = True
 isPrimitive _         = False
 isForeign Foreign{}   = True
 isForeign _           = False
+isVoid NoTy{}         = True
+isVoid _              = False
 
-isInput InArg{}     = True
-isInput _           = False
-isOutput RetArg{}   = True
-isOutput _          = False
-isState GlobVar{}   = True
-isState _           = False
-isVariable LocVar{} = True
-isVariable _        = False
-isMacro Macro{}     = True
-isMacro _           = False
+isInput InArg{}   = True
+isInput _         = False
+isOutput RetArg{} = True
+isOutput _        = False
+isState GlobVar{} = True
+isState _         = False
+isVar LocVar{}    = True
+isVar _           = False
+isMacro Macro{}   = True
+isMacro _         = False
+isGet Get{}       = True
+isGet _           = False
+isPut Put{}       = True
+isPut _           = False
 
 
 getTypeOf Macro{} = Nothing
 getTypeOf interf  = Just $ ifTy interf
 
+getOutput n ps = case filter isOutput ps of
+                   []  -> RetArg {ifName = "__OUT_",
+                                  ifTy   = NoTy "void",
+                                  ifVal  = NoVal} 
+                   [a] -> a
+                   xs  -> error $ "Gen: Function " ++ show n ++ " has more than " ++
+                          "one return argument:\n" ++ show xs

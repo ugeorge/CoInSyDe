@@ -13,6 +13,7 @@ import CoInSyDe.Backend.C.Core
 
 -- TODO: Monad instance; monadic generation during a single traversal.
 data Proj = Proj { welcome  :: Text
+                 , top      :: Comp C
                  , funDecls :: [Id]
                  , requmnts :: [Requ C]
                  , globVars :: IfMap C
@@ -22,10 +23,10 @@ data Proj = Proj { welcome  :: Text
 
 greet = pack "// Generated with CoInSyDe : Code Synthesizer for System Design //"
 
-emptyProj = Proj greet [] [] M.empty [] emptyDict
+emptyProj top = Proj greet top [] [] M.empty [] emptyDict
 
 buildProjStructure :: Dict (Comp C) -> [Id] -> [Proj]
-buildProjStructure db = L.map (\n -> updateProj db (db !* n) emptyProj)
+buildProjStructure db = L.map (\n -> updateProj db (db !* n) (emptyProj (db !* n)))
 
 traverseProj :: Dict (Comp C) -> Comp C -> Proj -> Proj
 traverseProj db cp@NvComp{} proj = updateProj db cp proj

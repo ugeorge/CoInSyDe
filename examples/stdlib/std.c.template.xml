@@ -14,10 +14,10 @@
     </template>
     <template name="stdinRead">
 	<requirement include="stdio.h"/>
-	scanf("(| format |)", &(| in |));
+	scanf("(| format.value |)", &amp;(| in |))
     </template>
     <template name="stdoutWrite">
 	<requirement include="stdio.h"/>
-	printff("(| format |)", (| out|));
+	printf("(| format.value |)", (| out|))
     </template>
 </library>
