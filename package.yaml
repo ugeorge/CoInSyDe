@@ -38,6 +38,8 @@ dependencies:
 - directory >= 1.2
 - binary
 - deepseq
+- aeson
+- unordered-containers
 # when:
 # - condition: flag(dynamic)
 #   dependencies:

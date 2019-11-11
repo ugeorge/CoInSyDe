@@ -26,7 +26,7 @@ import CoInSyDe.Backend.C
 main = do
   cmd <- getArgs >>= parse
   initDebug cmd
-  pDebug cmd $ show cmd
+  printDebug cmd $ show cmd
   
   -- check if libraries already loaded
   let tyObjPath = objp cmd </> name cmd <.> target cmd <.> "type" <.> "objdump"
@@ -46,9 +46,9 @@ main = do
       (tyLdList,cpLdList) <- buildLoadLists (target cmd) (libs cmd) 
 
       -- double check the load paths are correct
-      pDebug cmd $ "$COINSYDE_PATH = " ++  show (libs cmd)
-      pDebug cmd $ "** Loading type libs: " ++  show tyLdList
-      pDebug cmd $ "** Loading component libs: " ++  show cpLdList
+      printDebug cmd $ "$COINSYDE_PATH = " ++  show (libs cmd)
+      printDebug cmd $ "** Loading type libs: " ++  show tyLdList
+      printDebug cmd $ "** Loading component libs: " ++  show cpLdList
 
       tyObj <- loadTypeLibs (infile cmd) tyLdList
       cpObj <- loadCompLibs tyObj (infile cmd) cpLdList
@@ -99,12 +99,17 @@ initDebug x = when (isDebug x) $ init
       Left True  -> return ()
       Right o    -> writeFile o ""
 
-pDebug x = when (isDebug x) . debugOut
+printDebug x = when (isDebug x) . debugOut
   where
     debugOut = case debug x of
       Left False -> error "Impossible!"
       Left True  -> putStrLn
       Right o    -> appendFile o . (++"\n")
+
+dumpCode x doc = case outp x of
+  Nothing -> putDoc doc
+  Just f  -> withFile f WriteMode $
+             \h -> renderIO h $ layoutPretty (layout x) doc
 
 data Flag
   -- control
