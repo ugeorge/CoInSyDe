@@ -14,7 +14,7 @@ type CDoc = Doc ()
 -- requirements generator
 -------------------------------
 
-pInclude (Include file) = pretty "#include" <+> dquotes (pretty file) <> semi
+pInclude (Include file) = pretty "#include" <+> dquotes (pretty file)
 
 -------------------------------
 -- type declarations generator

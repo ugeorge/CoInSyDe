@@ -21,9 +21,33 @@ import Data.Aeson
 import Data.Aeson.Types 
 import Control.Exception
 import Control.Monad
+import qualified Data.Vector as V
 import Data.Maybe (fromMaybe,fromJust)
 import Data.Map.Lazy as M hiding (map,foldr,filter)
 import qualified Data.HashMap.Strict as H
+
+data JSON1 = Node !Text [JSON1]
+           | Attrib !Text !Text deriving Show
+
+instance FromJSON JSON1 where
+  parseJSON v@(Object _) = go "root" v
+    where
+      go :: Text -> Value -> Parser JSON1
+      go n o@(Object _) = withObject "Children" (\obj ->
+        fmap (Node n) . forM (H.toList obj) $ \(n,v) -> go n v) o
+      -- go n (Object o)   = Parent <$> H.mapWithKey (\k v -> go k v) o
+      go n  (String s)  = return $ Attrib n s
+      -- go n (Array a)  = go n $ Object $ H.fromList $ map ((,) n) $ V.toList a
+      go n a@(Array _)  = withArray "Children" (\obj ->
+        fmap (Node  n) . forM (V.toList obj) $ \v -> go n v) a
+      go _ x = error $ "JSON Critical: cannot parse " ++ show x
+  parseJSON _ = mzero
+
+
+
+
+
+
 
 -- | Hacky way to mimic XML nodes. JSON 'Value' not have info about the node name, but
 -- we store it in a record.
@@ -35,9 +59,11 @@ instance FromJSON JSON where
   parseJSON v@(Object _) = go "root" v
     where
       go :: Text -> Value -> Parser JSON
-      go n o@(Object _) = withObject "Children" (\obj ->
+      go n o@(Object _) = withObject "Attributes" (\obj ->
         fmap (LXML n . Right) . forM (H.toList obj) $ \(n, v) -> go n v) o
-      go n (String v) = return $ LXML n (Left v)
+      go n (String s) = return $ LXML n (Left s)
+      go n a@(Array _)  = withArray "Children" (\obj ->
+        fmap (LXML n . Right) . forM (V.toList obj) $ \v -> go n v) a
       go _ x = error $ "JSON Critical: cannot parse " ++ show x
   parseJSON _ = mzero
 

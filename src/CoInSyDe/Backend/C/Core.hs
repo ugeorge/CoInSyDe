@@ -82,12 +82,12 @@ instance Target C where
             deriving (Read, Show, Generic, NFData)
   mkIf pId typeLib node =
     case (getName node, node @! "class") of
-      ("port","iArg")    -> mkGeneric InArg  typeLib node
-      ("port","oArg")    -> mkGeneric RetArg typeLib node
+      ("iport","arg")    -> mkGeneric InArg  typeLib node
+      ("oport","arg")    -> mkGeneric RetArg typeLib node
+      ("iport","extern") -> mkGlued Get typeLib node
+      ("oport","extern") -> mkGlued Put typeLib node
       ("intern","var")   -> mkGeneric LocVar typeLib node
-      ("port","get")     -> mkGlued Get typeLib node
-      ("port","put")     -> mkGlued Put typeLib node
-      ("intern","state") -> mkState typeLib pId node
+      ("intern","state") -> mkGeneric GlobVar typeLib node
       ("intern","macro") -> mkParam node
       x -> error $ "Glue of type " ++ show x ++ " is not recognized!"
 
@@ -143,7 +143,7 @@ getParam name nodes = head (filterByAttr "name" name nodes) @! "value"
 
 -- | Can make an 'InArg', 'RetArg', 'LocVar' respectively from
 --
--- > port[@class="iArg"|"oArg",@name=*,@type=*,@?value=*,@?constructor=*]
+-- > iport|oport[@class="arg",@name=*,@type=*,@?value=*,@?constructor=*]
 --
 -- or
 --
@@ -158,7 +158,7 @@ mkGeneric cons tyLib node = cons name ty val
 
 -- | Can make a 'Get' or 'Put' respectively from
 --
--- > port[@class="get"|"put",@name=*,@type=*,@mechanism=*,@?value=*,@?constructor=*]
+-- > iport|oport[@class="extern",@name=*,@type=*,@mechanism=*,@?value=*,@?constructor=*]
 mkGlued cons tyLib node = cons name ty val glue
   where name = node @! "name"
         ty   = tyLib !* (node @! "type")

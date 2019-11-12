@@ -12,10 +12,11 @@ import System.FilePath.Posix
 import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.IO
 
-import Control.Monad (when,liftM)
+import Control.Monad
 import Control.Exception
 import Data.List
 import Data.Maybe
+import Data.Text (unpack)
 import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Text
 
@@ -63,14 +64,15 @@ main = do
       
   -- finally with all types and template libraries, load the C project
   (topIds,cpLib) <- loadProject C tyLib cpLib' (infile cmd)
+  let dbgPath1 = objp cmd </> name cmd <.> target cmd <.> "project" <.> "objdump1"
+  when (isDebug cmd) $ dumpPrettyLibObj dbgPath1 cpLib
 
   let projs   = buildProjStructure cpLib topIds
+      codes   = map generateCode projs
       dbgPath = objp cmd </> name cmd <.> target cmd <.> "project" <.> "objdump"
   when (isDebug cmd) $ dumpPrettyLibObj dbgPath projs
-  
 
-  -- renderIO handler $ layoutPretty (layout) $ generateCode xml
-  putDoc $ generateCode (head projs)
+  zipWithM_ (dumpCode cmd) topIds codes
   
   return ()
       
@@ -106,9 +108,9 @@ printDebug x = when (isDebug x) . debugOut
       Left True  -> putStrLn
       Right o    -> appendFile o . (++"\n")
 
-dumpCode x doc = case outp x of
+dumpCode x top doc = case outp x of
   Nothing -> putDoc doc
-  Just f  -> withFile f WriteMode $
+  Just d  -> withFile (d </> unpack top <.> "c") WriteMode $
              \h -> renderIO h $ layoutPretty (layout x) doc
 
 data Flag

@@ -29,6 +29,7 @@ generateCode (Proj welcome top funDecls requmnts globVars allTypes allFuncs) =
   , pretty "// Included libraries" <> line
     <> vsep (map pInclude requmnts)
   , pretty "// Custom types" <> line
+  -- TODO: Include natives here!
     <> vsep (map pTyDecl allTypes)
   , pretty "// State variables" <> line
     <> vsep (map ((<>semi) . pVarDecl) $ M.elems globVars)

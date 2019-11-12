@@ -237,7 +237,7 @@ getTopModules tName node = map (@!"name") tops
 
 -- | Makes a dictionary of interfaces operations from all the child nodes
 --
--- > <parent>/port|intern[@name=*]
+-- > <parent>/iport|oport|intern[@name=*]
 --
 -- Uses 'mkIf' from the 'Target' API.
 mkIfDict :: (Target l, FNode f)
@@ -247,7 +247,7 @@ mkIfDict :: (Target l, FNode f)
            -> IfMap l
 mkIfDict typeLib parentId = M.fromList . map mkEntry . ifNodes
   where
-    ifNodes = childrenOf ["port","intern"]
+    ifNodes = childrenOf ["iport","oport","intern"]
     mkEntry n = let name = n @! "name"
                 in (name, mkIf parentId typeLib n)
 

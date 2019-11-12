@@ -19,6 +19,8 @@ import Text.XML.Light
 import Control.Exception (throw)
 import Data.Maybe (fromMaybe)
 
+type XML = Element
+
 -- | XML 'Element' type from "Text.XML.Light".
 instance FNode Element where
   getInfo        = (++) "line ". maybe "_" show . elLine

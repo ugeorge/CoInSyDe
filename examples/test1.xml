@@ -1,18 +1,25 @@
 <?xml version="1.0"?>
 <!DOCTYPE ForSyDe-SY-to-C SYSTEM "test.dtd">
 <CoInSyDe_Project>
+    <!-- USER-PROVIDED CODE --> 
+    <native name="bool2int">
+	<iport name="arg" class="arg" type="Bool"/>
+	<oport name="ret" class="arg" type="Int"/>
+	<requirement include="./bool2int.c"/>
+    </native>
+
     <!-- SOFTWARE PATTERNS -->
     <pattern name="preMoore" type="comb">
-	<port name="i1" class="iArg" type="Bool"/>
-	<port name="o1" class="oArg" type="Int"/>
+	<iport name="i1" class="arg" type="Bool"/>
+	<oport name="o1" class="arg" type="Int"/>
 	<instance placeholder="func" component="bool2int" call="function">
 	    <bind replace="arg" with="i1"/>
 	    <bind replace="ret" with="o1"/>
 	</instance>
     </pattern>
     <pattern name="mainProcess_moore" type="moore">
-	<port name="i1" class="iArg" type="Int"/>
-	<port name="o1" class="oArg" type="Int"/>
+	<iport name="i1" class="arg" type="Int"/>
+	<oport name="o1" class="arg" type="Int"/>
 	<intern name="st" class="state" type="Int" value="0"/>
 	<instance placeholder="ns_func" component="+" call="inline">
 	    <bind replace="arg1" with="st"/>
@@ -28,8 +35,8 @@
     <!-- CUSTOM COMPOSITE FUNCTIONS -->
     <!-- Their instances imply scheduling -->
     <composite name="mainProcess" type="top" call="function">
-	<port name="i" class="get" type="Bool" mechanism="in_Read"/>
-	<port name="o" class="put" type="Int" mechanism="out_Write"/>
+	<iport name="i" class="extern" type="Bool" mechanism="in_Read"/>
+	<oport name="o" class="extern" type="Int" mechanism="out_Write"/>
 	<intern name="fromBool" class="var" type="Int"/>
 	<instance placeholder="1" component="preMoore" call="inline">
 	    <bind replace="i1" with="i"/>
@@ -50,10 +57,4 @@
 	</instance>
     </composite>
 
-    <!-- USER-PROVIDED CODE --> 
-    <native name="bool2int">
-	<port name="arg" class="iArg" type="Bool"/>
-	<port name="ret" class="oArg" type="Int"/>
-	<requirement include="./int2bool.c"/>
-    </native>
 </CoInSyDe_Project>

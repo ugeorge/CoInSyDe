@@ -84,8 +84,8 @@ import qualified Data.ByteString.Lazy as B
 import CoInSyDe.Core
 import CoInSyDe.Core.Dict
 import CoInSyDe.Frontend
-import CoInSyDe.Frontend.XML ()
-import Text.XML.Light as XML (Element)
+import CoInSyDe.Frontend.XML (XML)
+import CoInSyDe.Frontend.JSON (JSON)
 
 -- | Returns a path-wrapped frontend root node (e.g. XML root element). Should not be
 -- used alone, but within a @case@ block to avoid ambiguous instances.
@@ -147,7 +147,10 @@ noNameDuplicates (paths,names)
 pathToNameList what path = 
   case takeExtension path of
     ".xml" -> do
-      xml <- readLibDoc path :: IO XML.Element
+      xml <- readLibDoc path :: IO XML
+      return $ map (@!"name") $ childrenOf what xml
+    ".json" -> do
+      xml <- readLibDoc path :: IO JSON
       return $ map (@!"name") $ childrenOf what xml
     _ -> return []
 
@@ -175,8 +178,11 @@ loadTypeLibs projF paths = foldM (catchL load) emptyDict paths >>=
   where
     load lib path = case takeExtension path of
       ".xml" -> do
-        xml <- readLibDoc path :: IO XML.Element
+        xml <- readLibDoc path :: IO XML
         return $ mkTypeLib lib path xml
+      ".json" -> do
+        json <- readLibDoc path :: IO JSON
+        return $ mkTypeLib lib path json
       _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
 
 -- | Reads the content of the given files into a database of target-relevant
@@ -199,8 +205,11 @@ loadCompLibs typeLib projF paths = catchL load emptyDict projF >>=
       _ ->  \l x  -> mkNativeLib path typeLib (mkTemplateLib path l x) x
     load lib path = case takeExtension path of
       ".xml" -> do
-        xml <- readLibDoc path :: IO XML.Element
+        xml <- readLibDoc path :: IO XML
         return $ mkLib path lib xml
+      ".json" -> do
+        json <- readLibDoc path :: IO JSON
+        return $ mkLib path lib json
       _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
 
 -- | Loads the final project components (i.e. @pattern@s and @composite@s) from the
@@ -216,12 +225,16 @@ loadProject lang tyLib = catchL load
   where
     load cpLib path = case takeExtension path of
       ".xml" -> do
-        xml <- readLibDoc path :: IO XML.Element
-        let cpLib1 = mkPatternLib path tyLib cpLib xml
-            cpLib2 = mkCompositeLib lang path tyLib cpLib1 xml
-            tops   = getTopModules "top" xml 
-        return (tops, cpLib2)
+        xml <- readLibDoc path :: IO XML 
+        return (tops xml, cpLib' path cpLib xml)
+      ".json" -> do
+        json <- readLibDoc path :: IO JSON
+        return (tops json, cpLib' path cpLib json)
       _ -> error $ "Cannot load project file " ++ show path
+    ----------------------
+    cpLib' p l n = mkCompositeLib lang p tyLib (mkPatternLib p tyLib l n) n
+    tops n  = getTopModules "top" n
+    
 ---------------------------------------------------------------------
 
 -- | Dumps the content of a built dictionary into an @objdump@ file. TODO: dump to
