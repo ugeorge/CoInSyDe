@@ -86,6 +86,7 @@ import CoInSyDe.Core.Dict
 import CoInSyDe.Frontend
 import CoInSyDe.Frontend.XML (XML)
 import CoInSyDe.Frontend.JSON (JSON)
+import CoInSyDe.Frontend.YAML (YAML)
 
 -- | Returns a path-wrapped frontend root node (e.g. XML root element). Should not be
 -- used alone, but within a @case@ block to avoid ambiguous instances.
@@ -150,8 +151,11 @@ pathToNameList what path =
       xml <- readLibDoc path :: IO XML
       return $ map (@!"name") $ childrenOf what xml
     ".json" -> do
-      xml <- readLibDoc path :: IO JSON
-      return $ map (@!"name") $ childrenOf what xml
+      json <- readLibDoc path :: IO JSON
+      return $ map (@!"name") $ childrenOf what json
+    ".yaml" -> do
+      yaml <- readLibDoc path :: IO YAML
+      return $ map (@!"name") $ childrenOf what yaml
     _ -> return []
 
 ---------------------------------------------------------------------
@@ -183,6 +187,9 @@ loadTypeLibs projF paths = foldM (catchL load) emptyDict paths >>=
       ".json" -> do
         json <- readLibDoc path :: IO JSON
         return $ mkTypeLib lib path json
+      ".yaml" -> do
+        yaml <- readLibDoc path :: IO YAML
+        return $ mkTypeLib lib path yaml
       _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
 
 -- | Reads the content of the given files into a database of target-relevant
@@ -210,6 +217,9 @@ loadCompLibs typeLib projF paths = catchL load emptyDict projF >>=
       ".json" -> do
         json <- readLibDoc path :: IO JSON
         return $ mkLib path lib json
+      ".yaml" -> do
+        yaml <- readLibDoc path :: IO YAML
+        return $ mkLib path lib yaml
       _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
 
 -- | Loads the final project components (i.e. @pattern@s and @composite@s) from the
@@ -230,6 +240,9 @@ loadProject lang tyLib = catchL load
       ".json" -> do
         json <- readLibDoc path :: IO JSON
         return (tops json, cpLib' path cpLib json)
+      ".yaml" -> do
+        yaml <- readLibDoc path :: IO YAML
+        return (tops yaml, cpLib' path cpLib yaml)
       _ -> error $ "Cannot load project file " ++ show path
     ----------------------
     cpLib' p l n = mkCompositeLib lang p tyLib (mkPatternLib p tyLib l n) n

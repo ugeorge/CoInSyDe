@@ -122,7 +122,15 @@ pFunCall binds f =
     retArg   = getOutput (funName f) vars
     inArgs   = filter isInput vars
     retBName = pretty $ ifName (binds !?! ifName retArg)
-    bArgs    = map (\var -> pretty $ ifName (binds !?! ifName var)) inArgs
+    bArgs    = map (\var -> ifCall (binds !?! ifName var)) inArgs
+    --- TODO: test -- I don't want to deal with macros and pointers
+    ifCall (Macro _ v) = pretty v
+    ifCall (GlobVar n _ _) = pretty "&" <> pretty n
+    ifCall i = pretty (ifName i)
+    -- ifCall i = case ifTy i of
+    --              PtrTy{} -> pretty "&" <> pretty (ifName i)
+    --              _       -> pretty (ifName i)
+
 
 pMainFunc :: Dict (Comp C) -> IfMap C -> Comp C -> CDoc
 pMainFunc db states top | sanity top =

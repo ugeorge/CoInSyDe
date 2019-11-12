@@ -2,11 +2,10 @@
 
 // Included libraries
 #include "stdio.h"
+#include "./bool2int.c"
 
 // Custom types
 typedef enum { false=0, true=1 } bool_t;
-
-#include "./bool2int.c"
 
 // State variables
 int st0;

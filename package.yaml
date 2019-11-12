@@ -39,6 +39,7 @@ dependencies:
 - binary
 - deepseq
 - aeson
+- yaml
 - vector
 - unordered-containers
 # when:

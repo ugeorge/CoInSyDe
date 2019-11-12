@@ -93,6 +93,11 @@ updateProj db cp proj =
     newFunDecls cp@NvComp{} = maybe (L.delete (funName cp) (funDecls proj))
       (const $ funDecls proj) (funCode cp)
     ---------- AUXILLIARY FUNCTIONS ----------
+    -- --TODO: I don't want to deal with pointers for now, so I unwrap them all
+    -- unPtr (PtrTy _ b) = b
+    -- unPtr x = x
+    -- canDeclare (PtrTy _ b) = canDeclare b
+    -- --ENDTODO
     canDeclare x = not $ isForeign x || isPrimitive x
     currTypes    = J.mapMaybe getTypeOf (M.elems $ ifs cp)
     -- errGlob k    = "Global variable " ++ show k ++ " declared multiple times."
