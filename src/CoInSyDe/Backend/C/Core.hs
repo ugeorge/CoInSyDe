@@ -96,7 +96,7 @@ instance Target C where
   data Requ C = Include Text deriving (Read, Show, Eq, Generic, NFData)
   mkRequ node = Include (node @! "include")
 
-    -- todo HACK!!
+  -- todo HACK!!
   mkComposite _ node =
     map ((\x -> TFun x []) . pack . show) $ take (length $ insts) [1::Int ..]
     where insts = filter (\x -> isJust (readMaybe (unpack $ x@!"placeholder") :: Maybe Int)) $ node |= "instance"

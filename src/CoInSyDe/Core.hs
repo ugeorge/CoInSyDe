@@ -276,7 +276,7 @@ mkInstances parentIfs = M.fromList . map mkInst . children "instance"
 -- with the parent component's interface types.
 mkBindings :: (Target l, FNode f)
            => IfMap l -- ^ parent component's interface dictionary
-           -> f              -- ^ @instance@ node
+           -> f       -- ^ @instance@ node
            -> IfMap l -- ^ new interface dictionary
 mkBindings parentIfs = M.fromList . map mkBind . children "bind"
   where
