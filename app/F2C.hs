@@ -64,8 +64,8 @@ main = do
       
   -- finally with all types and template libraries, load the C project
   (topIds,cpLib) <- loadProject C tyLib cpLib' (infile cmd)
-  let dbgPath1 = objp cmd </> name cmd <.> target cmd <.> "project" <.> "objdump1"
-  when (isDebug cmd) $ dumpPrettyLibObj dbgPath1 cpLib
+  -- let dbgPath1 = objp cmd </> name cmd <.> target cmd <.> "project" <.> "objdump1"
+  -- when (isDebug cmd) $ dumpPrettyLibObj dbgPath1 cpLib
 
   let projs   = buildProjStructure cpLib topIds
       codes   = map generateCode projs

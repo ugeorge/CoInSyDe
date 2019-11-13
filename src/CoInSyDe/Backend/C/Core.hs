@@ -90,10 +90,10 @@ instance Target C where
       ("iport","extern") -> mkGlued Get typeLib node
       ("oport","extern") -> mkGlued Put typeLib node
       ("intern","var")   -> mkGeneric LocVar typeLib node
-      ("intern","state") -> mkGeneric GlobVar typeLib node
+      ("intern","state") -> mkState typeLib pId node
       ("intern","macro") -> mkParam node
       x -> error $ "Glue of type " ++ show x ++ " is not recognized!"
-  mkMacro val = Macro "__intern__" val
+  mkMacro = Macro "__intern__"
 
   data Requ C = Include Text deriving (Read, Show, Eq, Generic, NFData)
   mkRequ node = Include (node @! "include")

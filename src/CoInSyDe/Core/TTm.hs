@@ -71,7 +71,8 @@ mkQuery c tx = let l = split (=='.') (pack tx)
                in  c (head l) (map unpack $ tail l)
 
 --------------------------------------------------
-
+-- isSpace' '\n' = False
+-- isSpace' c    = isSpace c
 whiteSpace = skipMany (skipMany1 (satisfy isSpace) <?> "")
 
 lexeme p = do{ x <- p; whiteSpace; return x  }

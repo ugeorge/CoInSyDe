@@ -7,6 +7,7 @@ import CoInSyDe.Backend.C.Core
 
 import qualified Data.Map.Lazy as M
 import Data.Text.Prettyprint.Doc 
+import Data.Text (pack, replace)
 
 type CDoc = Doc ()
 
@@ -195,7 +196,7 @@ pFunCode :: Dict (Comp C)
          -> CDoc
 pFunCode db cp cIfs cRefs = fillCat . map generate
   where
-    generate (TCode str) = pretty str
+    generate (TCode str) = pretty $ replace (pack "¤") (pack "\n") str
     generate (TPort n q) = ifQuery db cp cIfs n q
     generate (TFun  n _) -- TODO: for now query is ignored 
       | rInline   = nest 4 $
