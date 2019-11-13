@@ -59,7 +59,6 @@ instance Target C where
               | Struct  {tyName :: Id, sEntries  :: Map Text (Type C)}
               | Array   {tyName :: Id, arrBaseTy :: Type C, arrSize :: Int}
               | Foreign {tyName :: Id, tyRequ    :: [Requ C]}
-              -- | PtrTy   {tyName :: Id, ptrBaseTy :: Type C}
               | NoTy    {tyName :: Id} -- ^ will always be void
               deriving (Read, Show, Eq, Generic, NFData)
   mkType _ typeLib node =
@@ -68,7 +67,6 @@ instance Target C where
       "enum"      -> mkEnumTy targetName parameters
       "struct"    -> mkStruct typeLib targetName parameters
       "array"     -> mkArray  typeLib targetName parameters
-      -- "pointer"   -> mkPtrTy  typeLib parameters
       "foreign"   -> mkForeign targetName requirements
       x -> error $ "Type class " ++ show x ++ " is not recognized!"
     where targetName   = node @! "targetName"
