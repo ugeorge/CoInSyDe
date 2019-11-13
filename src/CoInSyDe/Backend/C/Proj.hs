@@ -98,7 +98,7 @@ updateProj db cp proj =
     -- unPtr x = x
     -- canDeclare (PtrTy _ b) = canDeclare b
     -- --ENDTODO
-    canDeclare x = not $ isForeign x || isPrimitive x
+    canDeclare x = not $ isForeign x || isPrimitive x || isArray x
     currTypes    = J.mapMaybe getTypeOf (M.elems $ ifs cp)
     -- errGlob k    = "Global variable " ++ show k ++ " declared multiple times."
 

@@ -31,7 +31,7 @@ instance Show FrontendException where
 
 -- | This is a minimal implementation for a tree-like object parser. The only type
 -- needed to be wrapped is the node element specific to the frontend representation.
-class FNode f where
+class Show f => FNode f where
   -- | Returns the root node from a document file.
   readDoc  :: ByteString -> f
   -- | Returns a list with all the child nodes with a certain name

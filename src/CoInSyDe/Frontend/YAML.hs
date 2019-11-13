@@ -28,8 +28,8 @@ import Data.HashMap.Strict as H (toList)
 
 -- | Hacky way to mimic XML nodes. YAML 'Value' does not have info about the node
 -- name, but we store it in a record.
-data YAML = Node   { jsonName :: !Text, jsonContent :: [YAML]}
-          | Attrib { jsonName :: !Text, jsonValue :: !Text}
+data YAML = Node   { yamlName :: !Text, yamlContent :: [YAML]}
+          | Attrib { yamlName :: !Text, yamlValue :: !Text}
           deriving Show
 
 
@@ -52,11 +52,13 @@ instance FromJSON YAML where
 -- | YAML parser API
 instance FNode YAML where
   getInfo _      = "YAML"  -- TODO: use Yaml.ParseException
-  children str   = filter (\n -> jsonName n == pack str) . jsonContent
+  children str n = case n of
+                     Node _ c   -> filter (\n -> yamlName n == pack str) c
+                     Attrib n _ -> error $ show n ++ " is an attribute, not a node!"
   getTxt n       = case children "code" n of
                      [Attrib _ a]  -> a
                      _             -> pack "" 
-  getName        = unpack . jsonName
+  getName        = unpack . yamlName
   readDoc doc    = case decodeEither' (toStrict doc) of
                      Left err -> throw $ ParseException "" $
                                  prettyPrintParseException err
@@ -64,5 +66,5 @@ instance FNode YAML where
   getAttr attr n = case children attr n of
                      [Attrib _ a]  -> Right a
                      _ -> Left $ "cannot find attribute " ++ show attr ++
-                          " in node of type " ++ show (jsonName n)
+                          " in node of type " ++ show (yamlName n)
 

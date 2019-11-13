@@ -20,7 +20,7 @@ module CoInSyDe.Backend.C.Core (
   -- * 'If' (interface) constructors
   mkGeneric, mkGlued, mkState, mkParam,
   -- * Utilities
-  isPrimitive,isForeign,isVoid,
+  isPrimitive,isForeign,isVoid,isArray,
   isInput,isOutput,isState,isVar,isMacro,isGet,isPut,
   getTypeOf,getOutput
   ) where
@@ -34,6 +34,7 @@ import GHC.Generics (Generic)
 import Control.DeepSeq (NFData)
 import Data.Text (Text,pack,unpack,append,snoc)
 import Data.Text.Read
+import Data.List (intersperse)
 import Data.Map.Lazy as M hiding (map,filter,take)
 
 import Text.Read
@@ -92,13 +93,14 @@ instance Target C where
       ("intern","state") -> mkGeneric GlobVar typeLib node
       ("intern","macro") -> mkParam node
       x -> error $ "Glue of type " ++ show x ++ " is not recognized!"
+  mkMacro val = Macro "__intern__" val
 
   data Requ C = Include Text deriving (Read, Show, Eq, Generic, NFData)
   mkRequ node = Include (node @! "include")
 
   -- todo HACK!!
   mkComposite _ node =
-    map ((\x -> TFun x []) . pack . show) $ take (length $ insts) [1::Int ..]
+    intersperse (TCode "\n") $ map ((\x -> TFun x []) . pack . show) $ take (length $ insts) [1::Int ..]
     where insts = filter (\x -> isJust (readMaybe (unpack $ x@!"placeholder") :: Maybe Int)) $ node |= "instance"
 -----------------------------------------------------------------
 
@@ -200,6 +202,8 @@ isForeign Foreign{}   = True
 isForeign _           = False
 isVoid NoTy{}         = True
 isVoid _              = False
+isArray Array{}       = True
+isArray _             = False
 
 isInput InArg{}   = True
 isInput _         = False

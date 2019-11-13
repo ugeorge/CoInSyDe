@@ -35,6 +35,9 @@ pTyDecl (EnumTy nm vals) =
   where initVar (a, Nothing) = pretty a
         initVar (a, Just v)  = pretty a <> equals <> pretty v
 
+-- pTyDecl (Array nm base size) = 
+--   pretty (tyName base) <+> pretty nm <> brackets (pretty size)
+
 pTyDecl (Struct nm types) =
   pretty "struct"
   <+> pretty nm
@@ -60,7 +63,7 @@ pVarFunCall db cp n =
   let inst    = (refs cp) !?! n
   in  if inline inst
       then let rCp = db !* refId inst
-           in  nest 4 $ fillCat $
+           in  nest 4 $
                pFunCode db cp (bindings inst) (refs rCp) (template rCp)
       else pFunCall (bindings inst) (db !* refId inst)
 
@@ -68,7 +71,9 @@ pVarFunCall db cp n =
 
 pVarDecl :: If C -> CDoc
 pVarDecl Macro{} = error "Gen: Macro should not be declared!"
-pVarDecl i = pVarT i <+> pVarN i
+pVarDecl i = case ifTy i of
+  (Array n b s) -> pretty (tyName b) <+> pretty "*" <> pVarN i
+  _ -> pVarT i <+> pVarN i
 
 pVarInit :: Dict (Comp C) -> Comp C -> If C -> CDoc
 pVarInit _ _ Macro{} = error "Gen: Macro should not be initialized!"
@@ -76,7 +81,9 @@ pVarInit db cp i = pVarN i <> pVarV db cp i
 
 pVarDeclInit :: Dict (Comp C) -> Comp C -> If C -> CDoc
 pVarDeclInit _ _ Macro{} = error "Gen: Macro should not be initialized!"
-pVarDeclInit db cp i = pVarT i <+> pVarN i <> pVarV db cp i
+pVarDeclInit db cp i = case ifTy i of
+  (Array n b s) -> pretty (tyName b) <+> pVarN i <> brackets (pretty s)
+  _ -> pVarT i <+> pVarN i <> pVarV db cp i
 
 pPortSync :: Dict (Comp C) -> Comp C -> If C -> CDoc
 pPortSync db cp i@Get{} = pVarFunCall db cp (ifGlue i) 
@@ -134,7 +141,7 @@ pFunCall binds f =
 
 pMainFunc :: Dict (Comp C) -> IfMap C -> Comp C -> CDoc
 pMainFunc db states top | sanity top =
-  header <+> cBraces (initSt ++ varDecl ++ loop (callGet ++ code ++ callPut))
+  header <+> cBraces (initSt ++ varDecl ++ loop (callGet ++ [code] ++ callPut))
   where
     header = pretty "int main(int argc, char ** argv)"
     initSt = map ((<>semi) . pVarInit db top) (M.elems states)
@@ -163,7 +170,7 @@ pFunDef db f = header <+> cBraces body
     header = pretty (tyName $ ifTy retArg) <+> pretty (funName f)
              <+> sepArgLine (map pVarDecl inArgs)
     body   = case f of
-               TmComp{} -> varDecl ++ callGet ++ code ++ callPut ++ retStr
+               TmComp{} -> varDecl ++ callGet ++ [code] ++ callPut ++ retStr
                NvComp{} -> maybe (error critMsg) ((:[]) . pretty) (funCode f)
     --------------------------------------------------
     varDecl= map ((<>semi) . pVarDeclInit db f) allVars
@@ -185,13 +192,13 @@ pFunCode :: Dict (Comp C)
          -> IfMap C
          -> InstMap C
          -> [TTm]
-         -> [CDoc]
-pFunCode db cp cIfs cRefs = map generate
+         -> CDoc
+pFunCode db cp cIfs cRefs = fillCat . map generate
   where
     generate (TCode str) = pretty str
     generate (TPort n q) = ifQuery db cp cIfs n q
     generate (TFun  n _) -- TODO: for now query is ignored 
-      | rInline   = nest 4 $ fillCat $
+      | rInline   = nest 4 $
                     pFunCode db rComp rBoundIfs rBoundRefs (template rComp)
       | otherwise = pFunCall rBoundIfs rComp
       where (Bind rId rInline rBoundIfs) = cRefs !?! n

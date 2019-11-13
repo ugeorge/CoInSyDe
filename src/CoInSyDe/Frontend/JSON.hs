@@ -51,7 +51,9 @@ instance FromJSON JSON where
 -- | JSON parser API
 instance FNode JSON where
   getInfo _      = "JSON"  -- Aeson does not have error reporting!
-  children str   = filter (\n -> jsonName n == pack str) . jsonContent
+  children str n = case n of
+                     Node _ c   -> filter (\n -> jsonName n == pack str) c
+                     Attrib n _ -> error $ show n ++ " is an attribute, not a node!"
   getTxt n       = case children "code" n of
                      [Attrib _ a]  -> a
                      _             -> pack "" 

@@ -62,6 +62,8 @@ class ( Typeable l
   mkRequ :: FNode f => f -> Requ l
   -- | Constructor for a composite template
   mkComposite :: FNode f => l -> f -> [TTm]
+  -- | Constructor for a text/macro
+  mkMacro :: Text -> If l
 
 -- | Container for functional components or glue operators
 data Comp l where
@@ -270,7 +272,7 @@ mkInstances parentIfs = M.fromList . map mkInst . children "instance"
 -- | Makes a dicionary of interfaces based on the name bindings infereed from all the
 -- child nodes
 --
--- > instance/bind[@replace=*,@with=*]
+-- > instance/bind[@replace=*,@with=*|@withText=*]
 --
 -- The new if dictionary will contain the referred component's interface names but
 -- with the parent component's interface types.
@@ -280,9 +282,10 @@ mkBindings :: (Target l, FNode f)
            -> IfMap l -- ^ new interface dictionary
 mkBindings parentIfs = M.fromList . map mkBind . children "bind"
   where
-    mkBind n = let from = n @! "with"
-                   to   = n @! "replace"
-                in (to, parentIfs ! from)
+    mkBind n = case (n @? "with",n @? "withText") of
+                 (Just from, Nothing) -> (n @! "replace", parentIfs ! from)
+                 (Nothing, Just val)  -> (n @! "replace", mkMacro val)
+                 _ -> error $ "<bind> node malformed: " ++ show n
 
 -- | Makes a list of requirements from all child nodes
 --

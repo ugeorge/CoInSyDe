@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 ----------------------------------------------------------------------
 -- |
 -- Module      :  CoInSyDe.Core.TTm
@@ -49,22 +50,22 @@ parseText :: Parser [TTm]
 parseText = do
   spaces
   expr  <- parseExpr
-  updateState (++[expr])
+  updateState (++expr)
   state <- getState
   (eof >> return state) <|> parseText
 
-parseExpr :: Parser TTm
-parseExpr = portTm <|> funTm <|> try codeTm
+parseExpr :: Parser [TTm]
+parseExpr = portTm <|> try funTm <|> try codeTm
 
-codeTm :: Parser TTm
+codeTm :: Parser [TTm]
 codeTm = let eoc = careful "(|" <|> careful "[|" <|> (eof >> string "")
-         in  (TCode . strip . pack) <$> anyChar `manyTill` eoc
+         in  ((:[]) . TCode . strip . pack) <$> anyChar `manyTill` eoc
 
-portTm :: Parser TTm
-portTm = mkQuery TPort <$> between (symbol "(|") (symbol "|)") identity
+portTm :: Parser [TTm]
+portTm = (:[]) . mkQuery TPort <$> between (symbol "(|") (symbol "|)") identity
 
-funTm :: Parser TTm
-funTm = mkQuery TFun <$> between (symbol "[|") (symbol "|]") identity
+funTm :: Parser [TTm]
+funTm = (:[TCode "\n"]) . mkQuery TFun <$> between (symbol "[|") (symbol "|]") identity
 
 mkQuery c tx = let l = split (=='.') (pack tx)
                in  c (head l) (map unpack $ tail l)
