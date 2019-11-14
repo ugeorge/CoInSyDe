@@ -75,7 +75,7 @@ import Control.Exception
 import Control.DeepSeq
 import Data.List
 import Data.Function (on)
-import Data.Text (Text,pack,splitOn)
+import Data.Text as T (Text,pack,splitOn,isPrefixOf)
 import qualified Data.Text.Lazy as TL (pack,unpack)
 import Data.Text.Lazy.Encoding (encodeUtf8,decodeUtf8)
 import Text.Pretty.Simple
@@ -144,7 +144,6 @@ noNameDuplicates (paths,names)
   where (_,dup) = foldr scanDup ([],[]) (concat names)
         scanDup n (ns,ds) = if n `elem` ns then (ns,n:ds) else (n:ns,ds) 
 
--- TODO: update when new frontends added
 pathToNameList what path = 
   case takeExtension path of
     ".xml" -> do
@@ -192,24 +191,53 @@ loadTypeLibs projF paths = foldM (catchL load) emptyDict paths >>=
         return $ mkTypeLib lib path yaml
       _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
 
+
 -- | Reads the content of the given files into a database of target-relevant
 -- components.
 --
 -- According to the library conventions, components are loaded from most to least
--- specific library files, the first one being the project file itself. New entries of
--- existing components are completely ignored (lazily).
+-- specific library files. \"New\" entries of existing components are completely
+-- ignored (lazily).
 loadCompLibs :: Target l
-             => Dict (Type l)  -- ^ fully-loaded type database
-             -> FilePath       -- ^ main project file
-             -> [FilePath]     -- ^ ordered list of load paths. See 'buildLoadLists'
+             => l             -- ^ proxy type to determine target language
+             -> Dict (Type l) -- ^ fully-loaded type database
+             -> [FilePath]    -- ^ ordered list of load paths. See 'buildLoadLists'
              -> IO (Dict (Comp l))
-loadCompLibs typeLib projF paths = catchL load emptyDict projF >>=
-                                   \lib -> foldM (catchL load) lib paths
-  where
+loadCompLibs lang typeLib = loadCompDb' lang Keep typeLib emptyDict
+
+-- | Loads the final project components from the main project file, after the
+-- databases have been succesfully built.
+loadProject :: Target l
+            => l             -- ^ proxy type to determine target language
+            -> Dict (Type l) -- ^ fully-built type database
+            -> Dict (Comp l) -- ^ fully-built component database
+            -> FilePath      -- ^ path to main project file
+            -> IO ([Id], Dict (Comp l))
+            -- ^ list with top module IDs along with the new component database
+loadProject lang tyLib cpLib path = do
+  comps <- loadCompDb' lang Replace tyLib cpLib [path]
+  let topModules = filter (T.isPrefixOf (pack "top_")) $ ids comps
+  return (topModules, comps)
+
+-- internal common implementation for loading components
+loadCompDb' :: Target l
+            => l             -- ^ proxy type to determine target language
+            -> Policy        -- ^ update policy in case of name clashes
+            -> Dict (Type l) -- ^ fully-loaded type database
+            -> Dict (Comp l) -- ^ partially-loaded component database
+            -> [FilePath]    -- ^ ordered list of load paths. See 'buildLoadLists'
+            -> IO (Dict (Comp l))
+loadCompDb' lang policy typeLib = foldM (catchL load)
+  where 
     mkLib path = case snd (trgAndType path) of
-      ".template" -> mkTemplateLib path
-      ".native"   -> mkNativeLib path typeLib
-      _ ->  \l x  -> mkNativeLib path typeLib (mkTemplateLib path l x) x
+        ".template" -> mkTemplateLib policy path 
+        ".native"   -> mkNativeLib policy path typeLib
+        ".composite"-> mkCompositeLib lang policy path typeLib
+        _  -> \ l x -> flip (mkTemplateLib policy path) x
+                       $ flip (mkNativeLib policy path typeLib) x
+                       $ flip (mkPatternLib policy path typeLib) x
+                       $ mkCompositeLib lang policy path typeLib l x
+              
     load lib path = case takeExtension path of
       ".xml" -> do
         xml <- readLibDoc path :: IO XML
@@ -219,34 +247,8 @@ loadCompLibs typeLib projF paths = catchL load emptyDict projF >>=
         return $ mkLib path lib json
       ".yaml" -> do
         yaml <- readLibDoc path :: IO YAML
-        return $ mkLib path lib yaml
+        return $ mkLib path lib yaml 
       _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
-
--- | Loads the final project components (i.e. @pattern@s and @composite@s) from the
--- main project file, after the databases have been succesfully built.
-loadProject :: Target l
-            => l             -- ^ proxy type to determine target language
-            -> Dict (Type l) -- ^ fully-built type database
-            -> Dict (Comp l) -- ^ fully-built component database
-            -> FilePath      -- ^ path to main project file
-            -> IO ([Id], Dict (Comp l))
-            -- ^ list with top module IDs along with the new component database
-loadProject lang tyLib = catchL load
-  where
-    load cpLib path = case takeExtension path of
-      ".xml" -> do
-        xml <- readLibDoc path :: IO XML 
-        return (tops xml, cpLib' path cpLib xml)
-      ".json" -> do
-        json <- readLibDoc path :: IO JSON
-        return (tops json, cpLib' path cpLib json)
-      ".yaml" -> do
-        yaml <- readLibDoc path :: IO YAML
-        return (tops yaml, cpLib' path cpLib yaml)
-      _ -> error $ "Cannot load project file " ++ show path
-    ----------------------
-    cpLib' p l n = mkCompositeLib lang p tyLib (mkPatternLib p tyLib l n) n
-    tops n  = getTopModules "top" n
     
 ---------------------------------------------------------------------
 

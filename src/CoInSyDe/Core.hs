@@ -120,7 +120,7 @@ mkTypeLib tyLib fPath = foldr load tyLib . children "type"
     load n lib
       = let name    = n @! "name"
             info    = mkInfoNode fPath n
-        in dictReplace name (mkType name lib n) info lib
+        in dictUpdate Replace name (mkType name lib n) info lib
 
 -- | Builds a component dictionaty and load history from nodes
 --
@@ -129,15 +129,14 @@ mkTypeLib tyLib fPath = foldr load tyLib . children "type"
 -- These nodes /might/ contain a @CTEXT@ field with the source code for the native
 -- function. If it does not, then a @requirement@ child node pointing to the header
 -- where the function is defined is necessary.
---
--- Does __not__ replace entry if ID exists, see "CoInSyDe.LibManage" for load scheme.
 mkNativeLib :: (Target l, FNode f)
-            => FilePath       -- ^ file being loaded, for history bookkeeping
+            => Policy         -- ^ update policy in case of name clashes
+            -> FilePath       -- ^ file being loaded, for history bookkeeping
             -> Dict (Type l)  -- ^ (fully-loaded) library of types
             -> Dict (Comp l)  -- ^ existing library of components
             -> f              -- ^ @\<root\>@ node
             -> Dict (Comp l)  -- ^ updated library of components
-mkNativeLib fPath typeLib compLib = foldr load compLib . children "native"
+mkNativeLib policy fPath typeLib compLib = foldr load compLib . children "native"
   where
     load n lib
       = let name    = n @! "name"
@@ -150,21 +149,20 @@ mkNativeLib fPath typeLib compLib = foldr load compLib . children "native"
                         (c,_)   -> Just c
             info    = mkInfoNode fPath n
             newComp = NvComp name interfs reqmnts code
-        in dictKeep name newComp info lib 
+        in dictUpdate policy name newComp info lib 
 
 -- | Builds a component dictionaty and load history from nodes
 --
 --  > <root>/template[@name=*]CTEXT
 -- 
 -- The @CTEXT@ needs to be written in a template langiage, see 'TTm'.
---
--- Does __not__ replace entry if ID exists, see "CoInSyDe.LibManage" for load scheme.
 mkTemplateLib :: (Target l, FNode f)
-              => FilePath       -- ^ file being loaded, for history bookkeeping
+              => Policy         -- ^ update policy in case of name clashes
+              -> FilePath       -- ^ file being loaded, for history bookkeeping
               -> Dict (Comp l)  -- ^ existing library of components
               -> f              -- ^ @\<root\>@ node
               -> Dict (Comp l)  -- ^ updated library of components
-mkTemplateLib fPath compLib = foldr load compLib . children "template"
+mkTemplateLib policy fPath compLib = foldr load compLib . children "template"
   where
     load n lib
       = let name    = n @! "name"
@@ -172,22 +170,19 @@ mkTemplateLib fPath compLib = foldr load compLib . children "template"
             templ   = textToTm (unpack name) (getTxt n)
             info    = mkInfoNode fPath n
             newComp = TmComp name empty reqmnts empty templ
-        in dictKeep name newComp info lib 
+        in dictUpdate policy name newComp info lib 
 
 -- | Builds a component dictionaty and load history from all nodes
 --
 --  > <root>/pattern[@name=*,@type=*]
--- 
--- __OBS:__ Patterns are usually found in project files, and require that all template
--- libraries have been fully loaded. Replaces any previously-loaded component with the
--- same name. TODO: is this right, or should it throw error?
 mkPatternLib :: (Target l, FNode f)
-             => FilePath      -- ^ file being loaded, for history bookkeeping
+             => Policy         -- ^ update policy in case of name clashes
+             -> FilePath      -- ^ file being loaded, for history bookkeeping
              -> Dict (Type l) -- ^ (fully-loaded) library of types
              -> Dict (Comp l) -- ^ existing library of components
              -> f             -- ^ @\<root\>@ node
              -> Dict (Comp l) -- ^ updated library of components
-mkPatternLib fPath typeLib compLib = foldr load compLib . children "pattern"
+mkPatternLib policy fPath typeLib compLib = foldr load compLib . children "pattern"
   where
     load n lib
       = let name    = n @! "name"
@@ -197,7 +192,7 @@ mkPatternLib fPath typeLib compLib = foldr load compLib . children "pattern"
             templ   = template $ lib !* (n @! "type")
             info    = mkInfoNode fPath n
             newComp = TmComp name interfs reqmnts binds templ
-        in dictReplace name newComp info lib 
+        in dictUpdate policy name newComp info lib 
 
 -- | Builds a component dictionaty and load history from nodes
 --
@@ -205,18 +200,16 @@ mkPatternLib fPath typeLib compLib = foldr load compLib . children "pattern"
 -- 
 -- The @CTEXT@ might be template code, see 'TTm', in which case it overrides the
 -- default composite code template of the target language.
---
--- __OBS:__ Composites are usually found in project files, and require that all
--- template libraries have been fully loaded. Replaces any previously-loaded component
--- with the same name. TODO: is this right, or should it throw error?
 mkCompositeLib :: (Target l, FNode f)
                => l             -- ^ proxy to determine language
+               -> Policy        -- ^ update policy in case of name clashes
                -> FilePath      -- ^ file being loaded, for history bookkeeping
                -> Dict (Type l) -- ^ (fully-loaded) library of types
                -> Dict (Comp l) -- ^ existing library of components
                -> f             -- ^ @\<root\>@ node
                -> Dict (Comp l) -- ^ updated library of components
-mkCompositeLib lang fPath typeLib compLib = foldr load compLib . children "composite"
+mkCompositeLib lang policy fPath typeLib compLib =
+  foldr load compLib . children "composite"
   where
     load n
       = let name    = n @! "name"
@@ -228,7 +221,7 @@ mkCompositeLib lang fPath typeLib compLib = foldr load compLib . children "compo
                         tm -> textToTm (unpack name) tm
             info    = mkInfoNode fPath n
             newComp = TmComp name interfs reqmnts binds templ
-        in dictReplace name newComp info
+        in dictUpdate policy name newComp info
 
 getTopModules :: FNode f => String -> f -> [Id]
 getTopModules tName node = map (@!"name") tops

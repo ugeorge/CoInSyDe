@@ -9,7 +9,7 @@ import System.FilePath.Windows
 #else
 import System.FilePath.Posix
 #endif
-import System.Directory (doesFileExist, createDirectoryIfMissing)
+import System.Directory (doesFileExist, createDirectoryIfMissing, copyFile)
 import System.IO
 
 import Control.Monad
@@ -30,17 +30,17 @@ main = do
   printDebug cmd $ show cmd
   
   -- check if libraries already loaded
-  let tyObjPath = objp cmd </> name cmd <.> target cmd <.> "type" <.> "objdump"
-      cpObjPath = objp cmd </> name cmd <.> target cmd <.> "component" <.> "objdump"
-  isTyObj <- doesFileExist tyObjPath
-  isCpObj <- doesFileExist cpObjPath
+  let tyObjPathath = objPath cmd </> name cmd <.> target cmd <.> "type" <.> "objdump"
+      cpObjPathath = objPath cmd </> name cmd <.> target cmd <.> "component" <.> "objdump"
+  isTyObj <- doesFileExist tyObjPathath
+  isCpObj <- doesFileExist cpObjPathath
 
   -- load types and components libraries only if forced/needed
-  (tyLib,cpLib') <- case isTyObj && isCpObj && not (force cmd) of
+  (tyLib,cpLib) <- case isTyObj && isCpObj && not (force cmd) of
     -- if already existing, load previously-built objdumps
     True  -> do
-      tyObj <- loadLibObj tyObjPath :: IO (Dict (Type C))
-      cpObj <- loadLibObj cpObjPath :: IO (Dict (Comp C))
+      tyObj <- loadLibObj tyObjPathath :: IO (Dict (Type C))
+      cpObj <- loadLibObj cpObjPathath :: IO (Dict (Comp C))
       return (tyObj,cpObj)
     -- if not, build libraries and put them in objdumps
     False -> do
@@ -52,40 +52,40 @@ main = do
       printDebug cmd $ "** Loading component libs: " ++  show cpLdList
 
       tyObj <- loadTypeLibs (infile cmd) tyLdList
-      cpObj <- loadCompLibs tyObj (infile cmd) cpLdList
+      cpObj <- loadCompLibs C tyObj cpLdList
 
       -- dump the built databases. If debug, then pretty-dump
-      createDirectoryIfMissing True (objp cmd)
-      (if isDebug cmd then dumpPrettyLibObj else dumpLibObj) tyObjPath tyObj
-      (if isDebug cmd then dumpPrettyLibObj else dumpLibObj) cpObjPath cpObj
+      createDirectoryIfMissing True (objPath cmd)
+      (if isDebug cmd then dumpPrettyLibObj else dumpLibObj) tyObjPathath tyObj
+      (if isDebug cmd then dumpPrettyLibObj else dumpLibObj) cpObjPathath cpObj
         
       -- return for further use
       return (tyObj,cpObj)
       
   -- finally with all types and template libraries, load the C project
-  (topIds,cpLib) <- loadProject C tyLib cpLib' (infile cmd)
+  (topIds,projDb) <- loadProject C tyLib cpLib (infile cmd)
 
-  let projs   = buildProjStructure cpLib topIds
-      codes   = map generateCode projs
-      dbgPath = objp cmd </> name cmd <.> target cmd <.> "project" <.> "objdump"
+  let projs   = buildProjStructure projDb topIds
+      dbgPath = objPath cmd </> name cmd <.> target cmd <.> "project" <.> "objdump"
   when (isDebug cmd) $ dumpPrettyLibObj dbgPath projs
 
-  zipWithM_ (dumpCode cmd) topIds codes
+  zipWithM_ (dumpCode cmd) topIds projs
   
   return ()
       
 
 data Commands
-  = CFlags { name   :: String
-           , debug  :: Either Bool FilePath
-           , layout :: LayoutOptions
-           , target :: String
-           , force  :: Bool
-           , docs   :: Maybe String
-           , infile :: FilePath
-           , outp   :: Maybe FilePath
-           , objp   :: FilePath
-           , libs   :: String
+  = CFlags { name    :: String
+           , debug   :: Either Bool FilePath
+           , layout  :: LayoutOptions
+           , target  :: String
+           , force   :: Bool
+           , docs    :: Maybe String
+           , infile  :: FilePath
+           , inPath  :: FilePath
+           , outPath :: Maybe FilePath
+           , objPath :: FilePath
+           , libs    :: String
            } deriving (Show)
 
 isDebug x = case debug x of
@@ -106,10 +106,23 @@ printDebug x = when (isDebug x) . debugOut
       Left True  -> putStrLn
       Right o    -> appendFile o . (++"\n")
 
-dumpCode x top doc = case outp x of
-  Nothing -> putDoc doc
-  Just d  -> withFile (d </> unpack top <.> "c") WriteMode $
-             \h -> renderIO h $ layoutPretty (layout x) doc
+dumpCode x top proj = case outPath x of
+  Nothing -> putDoc $ generateCode proj
+  Just d  -> do
+    -- create dump path
+    let dumpPath = d </> name x
+    createDirectoryIfMissing True dumpPath
+    -- try to copy existing declared dependencies
+    forM_ (getDependencies proj) $ \f -> do
+      let depPath = inPath x </> normalise f
+          trgPath = dumpPath </> depPath
+      isDepFile <- doesFileExist depPath
+      when isDepFile $ do
+        createDirectoryIfMissing True (takeDirectory trgPath)
+        copyFile depPath trgPath
+    -- now generate and dump the code
+    withFile (dumpPath </> unpack top <.> "c") WriteMode $
+             \h -> renderIO h $ layoutPretty (layout x) $ generateCode proj
 
 data Flag
   -- control
@@ -147,7 +160,7 @@ flags =
     "Dumps the documentation for current project in given format. Default is html."
   -- Path flags
   , Option ['o'] ["out-path"] (ReqArg OutPath "PATH")
-    "Path where the output file(s) will be generated. Default is ./"
+    "Path where the outPathut file(s) will be generated. Default is ./"
   , Option []    ["obj-path"] (ReqArg ObjPath "PATH")
     "Path where the intermediate objects will be dumped. Tries to create it if does not exist. Default is <out-path>/obj"
   , Option ['L'] [] (ReqArg LoadPath "PATH")
@@ -184,22 +197,23 @@ parse argv =
                      []   -> Nothing
                      [""] -> Just "html"
                      [x]  -> Just x            
-          outp   = case ([x | OutPath x <- args],[x | x@(StdOut {}) <- args]) of
+          outP   = case ([x | OutPath x <- args],[x | x@(StdOut {}) <- args]) of
                      ([] ,[]) -> Just "."
                      ([x],[]) -> Just x
                      (_,_)    -> Nothing
-          objp   = case [x | ObjPath x <- args] of
-                     []   -> (fromMaybe "." outp) </> "obj"
-                     [""] -> (fromMaybe "." outp) </> "obj"
+          objP   = case [x | ObjPath x <- args] of
+                     []   -> (fromMaybe "." outP) </> "obj"
+                     [""] -> (fromMaybe "." outP) </> "obj"
                      [x]  -> x
           libs   = origLibs ++ ":" ++ intercalate ":" [x | LoadPath x <- args]
           inFile | null n = error "Please provide an input file!"
                  | otherwise = head n
-          projNm = takeBaseName inFile
+          projN = takeBaseName inFile
+          projP = takeDirectory inFile
       if Help `elem` args
         then do hPutStrLn stderr (usageInfo header flags)
                 exitSuccess
-        else return $ CFlags projNm debug layout target force docs inFile outp objp libs
+        else return $ CFlags projN debug layout target force docs inFile projP outP objP libs
   
     (_,_,errs) -> do
       hPutStrLn stderr (concat errs ++ usageInfo header flags)

@@ -13,18 +13,18 @@
 ----------------------------------------------------------------------
 module CoInSyDe.Core.Dict (
   -- * Types
-  Id, Dict, Info(..),
+  Id, Dict, Info(..), Policy(..),
   -- * Constructors
   emptyDict, mkDict, mkInfoNode,
   -- * Utilities
-  (!*), (!^), (!?!),
-  dictReplace, dictKeep, dictTransfer
+  (!*), (!^), (!?!), ids,
+  dictUpdate, dictTransfer
   ) where
 
 import Data.Typeable
 import Data.Maybe(fromMaybe)
 import Control.DeepSeq
-import Data.Text as T (Text)
+import Data.Text as T (Text,unpack)
 import Data.Map.Lazy as M hiding (map,foldr,filter)
 
 import CoInSyDe.Frontend (FNode,getInfo)
@@ -41,6 +41,8 @@ type Dict t = Map Id (t,[Info])
 data Info = Info {ldFile :: FilePath, ldInfo :: String} deriving (Show,Read)
 instance NFData Info where
   rnf _ = ()
+
+data Policy = Keep | Replace deriving (Show, Eq)
 
 emptyDict = empty
 
@@ -62,21 +64,23 @@ infixl 9 !*, !^, !?!
 (!?!) :: (Show t, Typeable k, Ord k, Show k) => Map k t -> k -> t
 (!?!) d k = fromMaybe (error $ dictErr1 k d) (d !? k)
 
+ids = keys
+
 -- | Makes a 'Dict' from a list of entries with their history.
 mkDict :: [(Id, t, [Info])] -> Dict t
 mkDict = M.fromList . map (\(i,c,h) -> (i,(c,h)))
 
--- | Inserts an entry into a 'Dict'. If existing, it replaces it, and updates the
--- history as the \"newest\" entry.
-dictReplace :: Id -> t -> Info -> Dict t -> Dict t
-dictReplace name c info = insertWith f name (c,[info])
-  where f (a,newh) (_,oldh) = (a,newh++oldh)
+-- | Inserts an entry into a 'Dict'. Depending on the 'Policy', if the entry exists:
+--
+-- * 'Replace' : replaces it and updates the history as the \"newest\" entry.
+-- * 'Keep' : ignores it and keeps the existing one, and updates the history as the
+--            \"oldest\" entry.
+dictUpdate :: Policy -> Id -> t -> Info -> Dict t -> Dict t
+dictUpdate Replace name c info = insertWith fReplace name (c,[info])
+dictUpdate Keep    name c info = insertWith fKeep name (c,[info])
 
--- | Inserts an entry into a 'Dict'. If existing, it ignores it and keeps the existing
--- one, and updates the history as the \"oldest\" entry.
-dictKeep :: Id -> t -> Info -> Dict t -> Dict t
-dictKeep name c info = insertWith f name (c,[info])
-  where f (_,newh) (a,oldh) = (a,oldh++newh)
+fReplace (a,newh) (_,oldh) = (a,newh++oldh)
+fKeep    (_,newh) (a,oldh) = (a,oldh++newh)
 
 -- | Transfers an entry from a dictionary to another.
 dictTransfer :: Typeable t => Id -> Dict t -> Dict t -> Dict t

@@ -12,7 +12,7 @@
 -- only the information necessary to simplify code generation and pretty printing.
 ----------------------------------------------------------------------
 module CoInSyDe.Backend.C.Proj (
-  Proj(..), buildProjStructure
+  Proj(..), buildProjStructure, getDependencies
   ) where
 
 import Data.List     as L
@@ -72,8 +72,7 @@ updateProj db cp proj =
     newReqmnts  = nub $ requmnts proj ++ reqs cp ++
                   L.concatMap tyRequ (L.filter isForeign currTypes)
     -- only states are allowed to be declared as global variables
-    newGlobVars = M.union
-                  (globVars proj) (M.filter isState $ ifs cp)
+    newGlobVars = M.union (globVars proj) (M.filter isState $ ifs cp)
     -- only non-foreign types need to be declared
     newTypes    = nub $ allTypes proj ++ L.filter canDeclare currTypes
     -- transfer component as-is
@@ -94,3 +93,5 @@ updateProj db cp proj =
     canDeclare x = not $ isForeign x || isPrimitive x || isArray x
     currTypes    = J.mapMaybe getTypeOf (M.elems $ ifs cp)
     -- errGlob k    = "Global variable " ++ show k ++ " declared multiple times."
+
+getDependencies = L.map (\(Include f) -> unpack f) . requmnts
