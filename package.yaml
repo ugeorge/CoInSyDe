@@ -31,6 +31,7 @@ dependencies:
 - text
 - containers
 - parsec
+- ginger
 - prettyprinter
 - pretty-simple >= 3
 - filepath
