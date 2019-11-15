@@ -15,28 +15,28 @@
 -- "CoInSyDe.Frontend" API.
 ----------------------------------------------------------------------
 module CoInSyDe.Core (
-  Dict, Id, Name, IfMap, InstMap,
+  -- * Aliases and convenience types
+  Id, Name, Map, MapH, IfMap, InstMap,
+  -- * Core Types
   Target(..), Comp(..), Instance(..),
+  -- * Core Type Constructors
   mkTypeLib, mkNativeLib, mkTemplateLib, mkPatternLib,
-  mkCompositeLib, getTopModules,
   -- * Only internal
 
   -- | These are exported only for documentation purpose. Not to be used as such.
-  mkIfDict,mkInstances,mkBindings,mkRequirements
+  mkIf,mkInstances,mkBindings,mkRequirements
   ) where
 
 import Data.Typeable
 import Data.Text as T (Text,unpack,strip)
-import Data.Map.Lazy as M hiding (map,foldr,filter)
 import Control.DeepSeq
 
 import CoInSyDe.Frontend
 import CoInSyDe.Core.Dict
-import CoInSyDe.Core.TTm
 
 ------------- ALIASES -------------
 
-type IfMap l    = Map Name (If l) -- ^ Alias for a if dictionary
+type IfMap l    = Map Name (If l)
 type InstMap l  = Map Name (Instance l)
 
 ------------- CORE TYPES -------------
@@ -60,8 +60,6 @@ class ( Typeable l
   mkIf   :: FNode f => Id -> Dict (Type l) -> f -> If l
   -- | Constructor for requirement type
   mkRequ :: FNode f => f -> Requ l
-  -- | Constructor for a composite template
-  mkComposite :: FNode f => l -> f -> [TTm]
   -- | Constructor for a text/macro
   mkMacro :: Text -> If l
 
@@ -75,7 +73,7 @@ data Comp l where
            , refs     :: InstMap l-- ^ maps a (template) function placeholder 'TFun'
                                   --   to an existing component, along with its new
                                   --   interface bindings
-           , template :: [TTm]    -- ^ template code
+           , template :: Text     -- ^ template code
            } -> Comp l
   -- | Native functional. Code used \"as-is\", no manipulation done.
   NvComp :: Target l =>
@@ -92,15 +90,15 @@ instance  Target l => NFData (Comp l) where
 
 -- | Container used for storing a reference to a functional component. 
 data Instance l where
-  Bind :: (Target l) =>
-          { refId    :: Id      -- ^ functional component ID
-          , inline   :: Bool    -- ^ True if expanded inline, False if abstracted away
-          , bindings :: IfMap l -- ^ bindings between parent and component ports
-          } -> Instance l
+  Ref :: (Target l) =>
+         { refId    :: Id      -- ^ functional component ID
+         , inline   :: Bool    -- ^ True if expanded inline, False if abstracted away
+         , bindings :: IfMap l -- ^ bindings between parent and component ports
+         } -> Instance l
 deriving instance Target l => Show (Instance l)
 deriving instance Target l => Read (Instance l)
 instance  Target l => NFData (Instance l) where
-  rnf (Bind n i b) = rnf n `seq` rnf i `seq` rnf b
+  rnf (Ref n i b) = rnf n `seq` rnf i `seq` rnf b
 
 ------------- EXPORTED DICTIONARY BUILDERS -------------
 
@@ -141,7 +139,7 @@ mkNativeLib policy fPath typeLib compLib = foldr load compLib . children "native
     load n lib
       = let name    = n @! "name"
             reqmnts = mkRequirements n
-            interfs = mkIfDict typeLib name n
+            interfs = mkIfs typeLib name n
             code    = case (strip $ getTxt n,reqmnts) of
                         ("",[]) -> error $ "Native node " ++ show name ++ " in file "
                                    ++ show fPath ++ ": code or requirement missing!"
@@ -166,6 +164,8 @@ mkTemplateLib policy fPath compLib = foldr load compLib . children "template"
   where
     load n lib
       = let name    = n @! "name"
+            interfs = mkIfs typeLib name n
+            binds   = mkInstances interfs n
             reqmnts = mkRequirements n
             templ   = textToTm (unpack name) (getTxt n)
             info    = mkInfoNode fPath n
@@ -186,47 +186,13 @@ mkPatternLib policy fPath typeLib compLib = foldr load compLib . children "patte
   where
     load n lib
       = let name    = n @! "name"
-            interfs = mkIfDict typeLib name n
+            interfs = mkIfs typeLib name n
             reqmnts = mkRequirements n
             binds   = mkInstances interfs n
             templ   = template $ lib !* (n @! "type")
             info    = mkInfoNode fPath n
             newComp = TmComp name interfs reqmnts binds templ
         in dictUpdate policy name newComp info lib 
-
--- | Builds a component dictionaty and load history from nodes
---
---  > <root>/composite[@name=*,@type=*]CTEXT?
--- 
--- The @CTEXT@ might be template code, see 'TTm', in which case it overrides the
--- default composite code template of the target language.
-mkCompositeLib :: (Target l, FNode f)
-               => l             -- ^ proxy to determine language
-               -> Policy        -- ^ update policy in case of name clashes
-               -> FilePath      -- ^ file being loaded, for history bookkeeping
-               -> Dict (Type l) -- ^ (fully-loaded) library of types
-               -> Dict (Comp l) -- ^ existing library of components
-               -> f             -- ^ @\<root\>@ node
-               -> Dict (Comp l) -- ^ updated library of components
-mkCompositeLib lang policy fPath typeLib compLib =
-  foldr load compLib . children "composite"
-  where
-    load n
-      = let name    = n @! "name"
-            interfs = mkIfDict typeLib name n
-            reqmnts = mkRequirements n
-            binds   = mkInstances interfs n
-            templ   = case strip $ getTxt n of
-                        "" -> mkComposite lang n
-                        tm -> textToTm (unpack name) tm
-            info    = mkInfoNode fPath n
-            newComp = TmComp name interfs reqmnts binds templ
-        in dictUpdate policy name newComp info
-
-getTopModules :: FNode f => String -> f -> [Id]
-getTopModules tName node = map (@!"name") tops
-  where tops = filterByAttr "type" tName $ node |= "composite"
-
 
 ------------- INTERNAL DICTIONARY BUILDERS -------------
 
@@ -235,12 +201,12 @@ getTopModules tName node = map (@!"name") tops
 -- > <parent>/iport|oport|intern[@name=*]
 --
 -- Uses 'mkIf' from the 'Target' API.
-mkIfDict :: (Target l, FNode f)
+mkIfs :: (Target l, FNode f)
            => Dict (Type l)  -- ^ library of types
            -> Id             -- ^ parent ID
            -> f              -- ^ @\<parent\>@ node
            -> IfMap l
-mkIfDict typeLib parentId = M.fromList . map mkEntry . ifNodes
+mkIfs typeLib parentId = M.fromList . map mkEntry . ifNodes
   where
     ifNodes = childrenOf ["iport","oport","intern"]
     mkEntry n = let name = n @! "name"

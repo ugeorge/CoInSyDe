@@ -199,8 +199,7 @@ loadTypeLibs projF paths = foldM (catchL load) emptyDict paths >>=
 -- specific library files. \"New\" entries of existing components are completely
 -- ignored (lazily).
 loadCompLibs :: Target l
-             => l             -- ^ proxy type to determine target language
-             -> Dict (Type l) -- ^ fully-loaded type database
+             => Dict (Type l) -- ^ fully-loaded type database
              -> [FilePath]    -- ^ ordered list of load paths. See 'buildLoadLists'
              -> IO (Dict (Comp l))
 loadCompLibs lang typeLib = loadCompDb' lang Keep typeLib emptyDict
@@ -208,8 +207,7 @@ loadCompLibs lang typeLib = loadCompDb' lang Keep typeLib emptyDict
 -- | Loads the final project components from the main project file, after the
 -- databases have been succesfully built.
 loadProject :: Target l
-            => l             -- ^ proxy type to determine target language
-            -> Dict (Type l) -- ^ fully-built type database
+            => Dict (Type l) -- ^ fully-built type database
             -> Dict (Comp l) -- ^ fully-built component database
             -> FilePath      -- ^ path to main project file
             -> IO ([Id], Dict (Comp l))
@@ -221,8 +219,7 @@ loadProject lang tyLib cpLib path = do
 
 -- internal common implementation for loading components
 loadCompDb' :: Target l
-            => l             -- ^ proxy type to determine target language
-            -> Policy        -- ^ update policy in case of name clashes
+            => Policy        -- ^ update policy in case of name clashes
             -> Dict (Type l) -- ^ fully-loaded type database
             -> Dict (Comp l) -- ^ partially-loaded component database
             -> [FilePath]    -- ^ ordered list of load paths. See 'buildLoadLists'
@@ -232,11 +229,9 @@ loadCompDb' lang policy typeLib = foldM (catchL load)
     mkLib path = case snd (trgAndType path) of
         ".template" -> mkTemplateLib policy path 
         ".native"   -> mkNativeLib policy path typeLib
-        ".composite"-> mkCompositeLib lang policy path typeLib
         _  -> \ l x -> flip (mkTemplateLib policy path) x
                        $ flip (mkNativeLib policy path typeLib) x
-                       $ flip (mkPatternLib policy path typeLib) x
-                       $ mkCompositeLib lang policy path typeLib l x
+                       $ mkPatternLib policy path typeLib x
               
     load lib path = case takeExtension path of
       ".xml" -> do

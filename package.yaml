@@ -29,20 +29,19 @@ dependencies:
 - base >= 4.7 && < 5
 - xml
 - text
-- containers
-- parsec
+- unordered-containers
 - ginger
-- prettyprinter
 - pretty-simple >= 3
 - filepath
 - bytestring >= 0.10
 - directory >= 1.2
-- binary
+# - binary
 - deepseq
 - aeson
 - yaml
 - vector
-- unordered-containers
+- data-default
+- mtl
 # when:
 # - condition: flag(dynamic)
 #   dependencies:
