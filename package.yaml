@@ -42,6 +42,8 @@ dependencies:
 - vector
 - data-default
 - mtl
+- hashable
+- prettyprinter
 # when:
 # - condition: flag(dynamic)
 #   dependencies:

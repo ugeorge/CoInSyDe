@@ -11,7 +11,10 @@ import           Data.Text hiding (map, filter, head)
 import           Text.Ginger
 import           Text.Ginger.Run.Type (GingerContext (..))
 
-type Doc = DocW Text
+
+import Data.Text.Lazy as TL (unpack)
+import Text.Pretty.Simple (pShow)
+
 type DocW = Writer Text
 type Runner = Run SourcePos DocW Text
 
@@ -31,12 +34,14 @@ mkContext f d = makeContextText
                   (fromFunction $ mkFunction f)
                   (H.map toGVal d) :: H.HashMap VarName (GVal Runner)
     err k = error $ "Template error: Key " ++ show k
-            ++ " not found in dictionary:\n" ++ show d
+            ++ " not found in dictionary:\n" ++ (TL.unpack $ pShow d)
 
 generateCode :: GingerContext SourcePos DocW Text
-             -> Source -> Doc
+             -> Source -> DocW Text
 generateCode context tpl = do
-  let options = mkParserOptions (\_ -> return Nothing)
+  let options' = mkParserOptions (\_ -> return Nothing)
+      options = options' { poLStripBlocks = True
+                         , poTrimBlocks = False}
   template <- either throw return =<< parseGinger' options tpl
   return $ runGinger context (optimize template)
 

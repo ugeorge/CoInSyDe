@@ -17,20 +17,27 @@ module CoInSyDe.Frontend.JSON where
 import CoInSyDe.Frontend
 
 import Control.Exception
+import Data.Yaml
 import Data.Aeson
 import Data.Maybe (fromMaybe)
-import Data.Text (pack)
+import Data.Text (strip,pack)
 import Data.Text.Lazy as TL (unpack)
 import Data.Vector as V (toList)
+import Data.ByteString.Lazy (toStrict)
 import Data.HashMap.Strict as H (lookup)
-import Text.Pretty.Simple
+import Text.Pretty.Simple (pShow)
 
 type JSON = Object
 
 -- | JSON parser API
 instance FNode JSON where
   getInfo _      = "JSON"  -- Aeson does not have error reporting!
-  readDoc        = fromMaybe (throw EmptyFile) . decode
+  -- readDoc        = fromMaybe (throw EmptyFile) . decode
+  readDoc doc  =
+    case decodeEither' (toStrict doc) of
+      Left err -> throw $ ParseException "" $
+                  prettyPrintParseException err
+      Right a  -> a
   children str n =
     case H.lookup (pack str) n of
       Just (Object o) -> [o]
@@ -39,7 +46,7 @@ instance FNode JSON where
       Nothing         -> []
   getTxt n =
     case H.lookup "code" n of
-      Just (String a) -> a
+      Just (String a) -> strip a -- TODO: remove heading and trailing whitespaces
       _               -> pack ""
   getStrAttr str n =
     case H.lookup (pack str) n of

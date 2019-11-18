@@ -1,18 +1,18 @@
 native:
   name: bool2int
-  iport: {name: arg, class: arg, type: Bool}
-  oport: {name: ret, class: arg, type: Int}
+  interface:
+  - {name: arg, class: iarg, type: Bool}
+  - {name: ret, class: oarg, type: Int}
   requirement: {include: "./bool2int.c"}
 pattern:
 - name: preMoore
   type: comb
-  iport:
-    name: i1
-    class: arg
+  interface:
+  - name: i1
+    class: iarg
     type: Bool
-  oport:
-    name: o1
-    class: arg
+  - name: o1
+    class: oarg
     type: Int
   instance:
     placeholder: func
@@ -23,25 +23,24 @@ pattern:
       with: i1
     - replace: ret
       with: o1
+
 - name: mainProcess_moore
   type: moore
-  iport:
-    name: i1
-    class: arg
+  interface:
+  - name: i1
+    class: iarg
     type: Int
-  oport:
-    name: o1
-    class: arg
+  - name: o1
+    class: oarg
     type: Int
-  intern:
-    name: st
+  - name: st
     class: state
     type: Int
     value: '0'
   instance:
   - placeholder: ns_func
     component: "+"
-    call: inline
+    inline: true
     bind:
     - replace: arg1
       with: st
@@ -51,27 +50,23 @@ pattern:
       with: st
   - placeholder: od_func
     component: id
-    call: inline
+    inline: true
     bind:
     - replace: arg
       with: st
     - replace: ret
       with: o1
-composite:
-  name: mainProcess
-  type: top
-  call: function
-  iport:
-    name: i
-    class: extern
+template:
+  name: top_mainProcess
+  interface:
+  - name: i
+    class: iport
     type: Bool
     mechanism: in_Read
-  oport:
-    name: o
-    class: extern
+  - name: o
+    class: oport
     type: Int
     mechanism: out_Write
-  intern:
   - name: fromBool
     class: var
     type: Int
@@ -79,35 +74,39 @@ composite:
     class: macro
     value: "%d"
   instance:
-  - placeholder: '1'
+  - placeholder: 1in_Read
+    component: stdinRead
+    inline: true
+    bind:
+    - replace: inp
+      with: i
+    - replace: form
+      with: formatStr
+  - placeholder: '2'
     component: preMoore
-    call: inline
+    inline: true
     bind:
     - replace: i1
       with: i
     - replace: o1
       with: fromBool
-  - placeholder: '2'
+  - placeholder: '3'
     component: mainProcess_moore
-    call: function
+    #inline: true
     bind:
     - replace: i1
       with: fromBool
     - replace: o1
       with: o
-  - placeholder: in_Read
-    component: stdinRead
-    call: inline
-    bind:
-    - replace: in
-      with: i
-    - replace: format
-      with: formatStr
-  - placeholder: out_Write
+  - placeholder: 4out_Write
     component: stdoutWrite
-    call: inline
+    inline: true
     bind:
-    - replace: format
+    - replace: form
       with: formatStr
     - replace: out
       with: o
+  code: |
+    {% for inst in instance %}
+    {{ placeholder(inst) }}
+    {% endfor %}

@@ -86,7 +86,7 @@ import CoInSyDe.Core.Dict
 import CoInSyDe.Frontend
 import CoInSyDe.Frontend.XML (XML)
 import CoInSyDe.Frontend.JSON (JSON)
-import CoInSyDe.Frontend.YAML (YAML)
+-- import CoInSyDe.Frontend.YAML (YAML)
 
 -- | Returns a path-wrapped frontend root node (e.g. XML root element). Should not be
 -- used alone, but within a @case@ block to avoid ambiguous instances.
@@ -153,7 +153,7 @@ pathToNameList what path =
       json <- readLibDoc path :: IO JSON
       return $ map (@!"name") $ childrenOf what json
     ".yaml" -> do
-      yaml <- readLibDoc path :: IO YAML
+      yaml <- readLibDoc path :: IO JSON
       return $ map (@!"name") $ childrenOf what yaml
     _ -> return []
 
@@ -175,7 +175,7 @@ catchL f l p = Control.Exception.catch (forceM $ f l p) handler
 loadTypeLibs :: Target l
              => FilePath    -- ^ main project file
              -> [FilePath]  -- ^ ordered list of load paths. See 'buildLoadLists'
-             -> IO (Dict (Type l))
+             -> IO (MapH (Type l))
 loadTypeLibs projF paths = foldM (catchL load) emptyDict paths >>=
                            \lib -> catchL load lib projF
   where
@@ -187,7 +187,7 @@ loadTypeLibs projF paths = foldM (catchL load) emptyDict paths >>=
         json <- readLibDoc path :: IO JSON
         return $ mkTypeLib lib path json
       ".yaml" -> do
-        yaml <- readLibDoc path :: IO YAML
+        yaml <- readLibDoc path :: IO JSON
         return $ mkTypeLib lib path yaml
       _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
 
@@ -199,39 +199,39 @@ loadTypeLibs projF paths = foldM (catchL load) emptyDict paths >>=
 -- specific library files. \"New\" entries of existing components are completely
 -- ignored (lazily).
 loadCompLibs :: Target l
-             => Dict (Type l) -- ^ fully-loaded type database
+             => MapH (Type l) -- ^ fully-loaded type database
              -> [FilePath]    -- ^ ordered list of load paths. See 'buildLoadLists'
-             -> IO (Dict (Comp l))
-loadCompLibs lang typeLib = loadCompDb' lang Keep typeLib emptyDict
+             -> IO (MapH (Comp l))
+loadCompLibs typeLib = loadCompDb' Keep typeLib emptyDict
 
 -- | Loads the final project components from the main project file, after the
 -- databases have been succesfully built.
 loadProject :: Target l
-            => Dict (Type l) -- ^ fully-built type database
-            -> Dict (Comp l) -- ^ fully-built component database
+            => MapH (Type l) -- ^ fully-built type database
+            -> MapH (Comp l) -- ^ fully-built component database
             -> FilePath      -- ^ path to main project file
-            -> IO ([Id], Dict (Comp l))
+            -> IO ([Id], MapH (Comp l))
             -- ^ list with top module IDs along with the new component database
-loadProject lang tyLib cpLib path = do
-  comps <- loadCompDb' lang Replace tyLib cpLib [path]
+loadProject tyLib cpLib path = do
+  comps <- loadCompDb' Replace tyLib cpLib [path]
   let topModules = filter (T.isPrefixOf (pack "top_")) $ ids comps
   return (topModules, comps)
 
 -- internal common implementation for loading components
 loadCompDb' :: Target l
             => Policy        -- ^ update policy in case of name clashes
-            -> Dict (Type l) -- ^ fully-loaded type database
-            -> Dict (Comp l) -- ^ partially-loaded component database
+            -> MapH (Type l) -- ^ fully-loaded type database
+            -> MapH (Comp l) -- ^ partially-loaded component database
             -> [FilePath]    -- ^ ordered list of load paths. See 'buildLoadLists'
-            -> IO (Dict (Comp l))
-loadCompDb' lang policy typeLib = foldM (catchL load)
-  where 
+            -> IO (MapH (Comp l))
+loadCompDb' policy tyLib  = foldM (catchL load)
+  where
     mkLib path = case snd (trgAndType path) of
-        ".template" -> mkTemplateLib policy path 
-        ".native"   -> mkNativeLib policy path typeLib
-        _  -> \ l x -> flip (mkTemplateLib policy path) x
-                       $ flip (mkNativeLib policy path typeLib) x
-                       $ mkPatternLib policy path typeLib x
+        ".template" -> mkTemplateLib policy path tyLib
+        ".native"   -> mkNativeLib policy path tyLib
+        _  -> \ l x -> flip (mkTemplateLib policy path tyLib) x
+                       $ flip (mkNativeLib policy path tyLib) x
+                       $ mkPatternLib policy path tyLib l x
               
     load lib path = case takeExtension path of
       ".xml" -> do
@@ -241,7 +241,7 @@ loadCompDb' lang policy typeLib = foldM (catchL load)
         json <- readLibDoc path :: IO JSON
         return $ mkLib path lib json
       ".yaml" -> do
-        yaml <- readLibDoc path :: IO YAML
+        yaml <- readLibDoc path :: IO JSON
         return $ mkLib path lib yaml 
       _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
     

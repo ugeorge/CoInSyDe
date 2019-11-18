@@ -26,7 +26,6 @@ module CoInSyDe.Backend.C.Core (
   ) where
 
 import CoInSyDe.Core
-import CoInSyDe.Core.TTm
 import CoInSyDe.Core.Dict
 import CoInSyDe.Frontend
 
@@ -35,11 +34,10 @@ import Control.DeepSeq (NFData)
 import Data.Text (Text,pack,unpack,append,snoc)
 import Data.Text.Read
 import Data.List (intersperse)
-import Data.Map.Lazy as M hiding (map,filter,take)
 
 import Text.Read
 import Data.Maybe
-import Data.Aeson
+import Data.Aeson hiding (Array,Value)
 
 -- | Defines the family of C target languages. In particular it defines a set of types
 -- (see 'Type C'), a set of interfaces (see 'If C') and a set of requirements (see
@@ -97,9 +95,10 @@ instance Target C where
   data Requ C = Include Text deriving (Read, Show, Eq, Generic, NFData)
   mkRequ node = Include (node @! "include")
 
+instance ToJSON Value     where toEncoding = genericToEncoding defaultOptions
+instance ToJSON (Requ C)  where toEncoding = genericToEncoding defaultOptions
 instance ToJSON (Type C)  where toEncoding = genericToEncoding defaultOptions
 instance ToJSON (If C)    where toEncoding = genericToEncoding defaultOptions
-instance ToJSON (IfMap C) where toEncoding = genericToEncoding defaultOptions
 
 -----------------------------------------------------------------
 
@@ -123,7 +122,7 @@ mkEnumTy tName pNodes = EnumTy tName (map extract pNodes)
 --
 -- > type[@name=*,@class="struct",@targetName=*]
 -- > + parameter[@name=*,@type=*]
-mkStruct tyLib tName pNodes = Struct tName (M.fromList $ map extract pNodes)
+mkStruct tyLib tName pNodes = Struct tName (mkMap $ map extract pNodes)
   where extract n = (n @! "name", tyLib !* (n @! "type"))
 
 -- | Makes an 'Array' from a node

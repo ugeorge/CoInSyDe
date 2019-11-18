@@ -17,6 +17,7 @@
 module CoInSyDe.Core (
   -- * Aliases and convenience types
   Id, Name, Map, MapH, IfMap, InstMap,
+  mkMap, ids, entries, (!?!),
   -- * Core Types
   Target(..), Comp(..), Instance(..),
   -- * Core Type Constructors
@@ -24,7 +25,7 @@ module CoInSyDe.Core (
   -- * Only internal
 
   -- | These are exported only for documentation purpose. Not to be used as such.
-  mkIf,mkInstances,mkBindings,mkRequirements
+  mkIfs,mkInstances,mkBindings,mkRequirements
   ) where
 
 import Data.Typeable
@@ -36,6 +37,7 @@ import CoInSyDe.Core.Dict
 
 ------------- ALIASES -------------
 
+type Name = Text
 type IfMap l    = Map Name (If l)
 type InstMap l  = Map Name (Instance l)
 
@@ -55,9 +57,9 @@ class ( Typeable l
   -- | A set of special requirements relevant to the target language.
   data Requ l :: *
   -- | Constructor for data types used in common methods
-  mkType :: FNode f => Id -> Dict (Type l) -> f -> Type l
+  mkType :: FNode f => Id -> MapH (Type l) -> f -> Type l
   -- | Constructor for interfaces used in common methods. 
-  mkIf   :: FNode f => Id -> Dict (Type l) -> f -> If l
+  mkIf   :: FNode f => Id -> MapH (Type l) -> f -> If l
   -- | Constructor for requirement type
   mkRequ :: FNode f => f -> Requ l
   -- | Constructor for a text/macro
@@ -67,17 +69,17 @@ class ( Typeable l
 data Comp l where
   -- | Template functional. Contains template code managed by CoInSyDe
   TmComp :: Target l =>
-           { funName  :: Id       -- ^ unique component ID
-           , ifs      :: IfMap l  -- ^ maps (template) names to component interfaces
-           , reqs     :: [Requ l] -- ^ special requirements for component
-           , refs     :: InstMap l-- ^ maps a (template) function placeholder 'TFun'
-                                  --   to an existing component, along with its new
-                                  --   interface bindings
-           , template :: String   -- ^ template code
+           { cpName :: Id       -- ^ unique component ID
+           , ifs    :: IfMap l  -- ^ maps (template) names to component interfaces
+           , reqs   :: [Requ l] -- ^ special requirements for component
+           , refs   :: InstMap l-- ^ maps a (template) function placeholder 'TFun' to
+                                -- an existing component, along with its new interface
+                                -- bindings
+           , template :: String -- ^ template code
            } -> Comp l
   -- | Native functional. Code used \"as-is\", no manipulation done.
   NvComp :: Target l =>
-           { funName :: Id         -- ^ unique component ID
+           { cpName  :: Id         -- ^ unique component ID
            , ifs     :: IfMap l    -- ^ maps port names to (caller) interfaces
            , reqs    :: [Requ l]   -- ^ special requirements for component
            , funCode :: Maybe Text -- ^ maybe native code
@@ -109,10 +111,10 @@ instance  Target l => NFData (Instance l) where
 -- Replaces existing entries if their IDs match. Made to be used with the CoInSyDe
 -- library load scheme, see "CoInSyDe.LibManage". Uses 'mkType' from the 'Target' API.
 mkTypeLib :: (Target l, FNode f)
-          => Dict (Type l) -- ^ existing library of types
+          => MapH (Type l) -- ^ existing library of types
           -> FilePath      -- ^ file being loaded, for history bookkeeping
           -> f             -- ^ @\<root\>@ node
-          -> Dict (Type l) -- ^ updated library of types
+          -> MapH (Type l) -- ^ updated library of types
 mkTypeLib tyLib fPath = foldr load tyLib . children "type"
   where
     load n lib
@@ -130,10 +132,10 @@ mkTypeLib tyLib fPath = foldr load tyLib . children "type"
 mkNativeLib :: (Target l, FNode f)
             => Policy         -- ^ update policy in case of name clashes
             -> FilePath       -- ^ file being loaded, for history bookkeeping
-            -> Dict (Type l)  -- ^ (fully-loaded) library of types
-            -> Dict (Comp l)  -- ^ existing library of components
+            -> MapH (Type l)  -- ^ (fully-loaded) library of types
+            -> MapH (Comp l)  -- ^ existing library of components
             -> f              -- ^ @\<root\>@ node
-            -> Dict (Comp l)  -- ^ updated library of components
+            -> MapH (Comp l)  -- ^ updated library of components
 mkNativeLib policy fPath typeLib compLib = foldr load compLib . children "native"
   where
     load n lib
@@ -157,19 +159,20 @@ mkNativeLib policy fPath typeLib compLib = foldr load compLib . children "native
 mkTemplateLib :: (Target l, FNode f)
               => Policy         -- ^ update policy in case of name clashes
               -> FilePath       -- ^ file being loaded, for history bookkeeping
-              -> Dict (Comp l)  -- ^ existing library of components
+              -> MapH (Type l)  -- ^ (fully-loaded) library of types
+              -> MapH (Comp l)  -- ^ existing library of components
               -> f              -- ^ @\<root\>@ node
-              -> Dict (Comp l)  -- ^ updated library of components
-mkTemplateLib policy fPath compLib = foldr load compLib . children "template"
+              -> MapH (Comp l)  -- ^ updated library of components
+mkTemplateLib policy fPath typeLib compLib = foldr load compLib . children "template"
   where
     load n lib
       = let name    = n @! "name"
             interfs = mkIfs typeLib name n
             binds   = mkInstances interfs n
             reqmnts = mkRequirements n
-            templ   = textToTm (unpack name) (getTxt n)
+            templ   = unpack $ getTxt n
             info    = mkInfoNode fPath n
-            newComp = TmComp name empty reqmnts empty templ
+            newComp = TmComp name interfs reqmnts binds templ
         in dictUpdate policy name newComp info lib 
 
 -- | Builds a component dictionaty and load history from all nodes
@@ -178,10 +181,10 @@ mkTemplateLib policy fPath compLib = foldr load compLib . children "template"
 mkPatternLib :: (Target l, FNode f)
              => Policy         -- ^ update policy in case of name clashes
              -> FilePath      -- ^ file being loaded, for history bookkeeping
-             -> Dict (Type l) -- ^ (fully-loaded) library of types
-             -> Dict (Comp l) -- ^ existing library of components
+             -> MapH (Type l) -- ^ (fully-loaded) library of types
+             -> MapH (Comp l) -- ^ existing library of components
              -> f             -- ^ @\<root\>@ node
-             -> Dict (Comp l) -- ^ updated library of components
+             -> MapH (Comp l) -- ^ updated library of components
 mkPatternLib policy fPath typeLib compLib = foldr load compLib . children "pattern"
   where
     load n lib
@@ -198,17 +201,20 @@ mkPatternLib policy fPath typeLib compLib = foldr load compLib . children "patte
 
 -- | Makes a dictionary of interfaces operations from all the child nodes
 --
--- > <parent>/iport|oport|intern[@name=*]
+-- > <parent>/interface[@name=*]
 --
 -- Uses 'mkIf' from the 'Target' API.
+--
+-- __OBS!__ Interface names are /not allowed/ to bear the same name as the  <https://jinja.palletsprojects.com/en/2.10.x/templates/#list-of-builtin-filters built-in Jinja functions>!
+--
+-- TODO: find out which other keywords are illegal (e.g. @in@).
 mkIfs :: (Target l, FNode f)
-           => Dict (Type l)  -- ^ library of types
+           => MapH (Type l)  -- ^ library of types
            -> Id             -- ^ parent ID
            -> f              -- ^ @\<parent\>@ node
            -> IfMap l
-mkIfs typeLib parentId = M.fromList . map mkEntry . ifNodes
+mkIfs typeLib parentId = mkMap . map mkEntry . children "interface"
   where
-    ifNodes = childrenOf ["iport","oport","intern"]
     mkEntry n = let name = n @! "name"
                 in (name, mkIf parentId typeLib n)
 
@@ -221,12 +227,12 @@ mkInstances :: (Target l, FNode f)
             => IfMap l   -- ^ parent's interface dictionary
             -> f         -- ^ @<parent>@ node
             -> Map Name (Instance l)
-mkInstances parentIfs = M.fromList . map mkInst . children "instance"
+mkInstances parentIfs = mkMap . map mkInst . children "instance"
   where
     mkInst n = let to   = n @! "placeholder"
                    from = n @! "component"
-                   inln = ("call" `hasValue` "inline") n
-               in (to, Bind from inln (mkBindings parentIfs n))
+                   inln = n @^ "inline"
+               in (to, Ref from inln (mkBindings parentIfs n))
 
 -- | Makes a dicionary of interfaces based on the name bindings infereed from all the
 -- child nodes
@@ -239,10 +245,10 @@ mkBindings :: (Target l, FNode f)
            => IfMap l -- ^ parent component's interface dictionary
            -> f       -- ^ @instance@ node
            -> IfMap l -- ^ new interface dictionary
-mkBindings parentIfs = M.fromList . map mkBind . children "bind"
+mkBindings parentIfs = mkMap . map mkBind . children "bind"
   where
     mkBind n = case (n @? "with",n @? "withText") of
-                 (Just from, Nothing) -> (n @! "replace", parentIfs ! from)
+                 (Just from, Nothing) -> (n @! "replace", parentIfs !?! from)
                  (Nothing, Just val)  -> (n @! "replace", mkMacro val)
                  _ -> error $ "<bind> node malformed: " ++ show n
 

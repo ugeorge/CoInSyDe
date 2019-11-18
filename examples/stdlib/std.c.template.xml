@@ -1,23 +1,23 @@
 <library name="standard" contains="type" target="c">
     <template name="comb">
-	[|func|]
+	{{ placeholder("func") }}
     </template>
     <template name="moore">
-	[|ns_func|]
-	[|od_func|]
+{{ placeholder("ns_func") }}
+{{ placeholder("od_func") }}
     </template>
     <template name="+">
-	(| ret |) = (| arg1 |) + (| arg2 |);
+	{{ret.ifName}} =  {{arg1.ifName}} + {{arg2.ifName}};
     </template>
     <template name="id">
-	(| ret |) = (| arg |);
+	{{ret.ifName}} = {{arg.ifName}};
     </template>
     <template name="stdinRead">
 	<requirement include="stdio.h"/>
-	scanf("(| format.value |)", &amp;(| in |))
+scanf("{{form.macroVal}}", &amp;{{inp.ifName}});
     </template>
     <template name="stdoutWrite">
 	<requirement include="stdio.h"/>
-	printf("(| format.value |)", (| out|))
+printf("{{form.macroVal}}", {{out.ifName}});
     </template>
 </library>

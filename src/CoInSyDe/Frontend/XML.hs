@@ -37,7 +37,7 @@ instance FNode Element where
                  " in node\n " ++ (TL.unpack $ pShow n)
   getBoolAttr attr n =
     case findAttr (qn attr) n of
-      Just a  -> Right $ a == "true" || a == "TRUE" || a = "yes" || a = "YES"
+      Just a  -> Right $ a == "true" || a == "TRUE" || a == "yes" || a == "YES"
       Nothing -> Left $ "cannot find attribute " ++ show attr ++
                  " in node\n " ++ (TL.unpack $ pShow n)
                  

@@ -39,8 +39,8 @@ main = do
   (tyLib,cpLib) <- case isTyObj && isCpObj && not (force cmd) of
     -- if already existing, load previously-built objdumps
     True  -> do
-      tyObj <- loadLibObj tyObjPathath :: IO (Dict (Type C))
-      cpObj <- loadLibObj cpObjPathath :: IO (Dict (Comp C))
+      tyObj <- loadLibObj tyObjPathath :: IO (MapH (Type C))
+      cpObj <- loadLibObj cpObjPathath :: IO (MapH (Comp C))
       return (tyObj,cpObj)
     -- if not, build libraries and put them in objdumps
     False -> do
@@ -52,7 +52,7 @@ main = do
       printDebug cmd $ "** Loading component libs: " ++  show cpLdList
 
       tyObj <- loadTypeLibs (infile cmd) tyLdList
-      cpObj <- loadCompLibs C tyObj cpLdList
+      cpObj <- loadCompLibs tyObj cpLdList
 
       -- dump the built databases. If debug, then pretty-dump
       createDirectoryIfMissing True (objPath cmd)
@@ -63,11 +63,14 @@ main = do
       return (tyObj,cpObj)
       
   -- finally with all types and template libraries, load the C project
-  (topIds,projDb) <- loadProject C tyLib cpLib (infile cmd)
+  (topIds,projDb) <- loadProject tyLib cpLib (infile cmd)
+  printDebug cmd $ "** Found top modules: " ++  show topIds
 
   let projs   = buildProjStructure projDb topIds
-      dbgPath = objPath cmd </> name cmd <.> target cmd <.> "project" <.> "objdump"
-  when (isDebug cmd) $ dumpPrettyLibObj dbgPath projs
+      dbgPath1 = objPath cmd </> name cmd <.> target cmd <.> "allcomp" <.> "objdump"
+      dbgPath2 = objPath cmd </> name cmd <.> target cmd <.> "project" <.> "objdump"
+  when (isDebug cmd) $ dumpPrettyLibObj dbgPath1 projDb
+  when (isDebug cmd) $ dumpPrettyLibObj dbgPath2 projs
 
   zipWithM_ (dumpCode cmd) topIds projs
   

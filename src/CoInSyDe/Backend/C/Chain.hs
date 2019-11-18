@@ -19,8 +19,9 @@ import CoInSyDe.Core.Dict
 import CoInSyDe.Backend.C.Proj
 import CoInSyDe.Backend.C.Pretty
 
-import Data.Text.Prettyprint.Doc
-import qualified Data.Map.Lazy as M
+-- import Prelude hiding ((<>))
+-- import Text.PrettyPrint
+import Data.Text.Prettyprint.Doc 
 
 -- | Generates Bare-Metal C code from a built C project spec.
 generateCode (Proj welcome top funDecls requmnts globVars allTypes allFuncs) =
@@ -32,7 +33,7 @@ generateCode (Proj welcome top funDecls requmnts globVars allTypes allFuncs) =
   -- TODO: Include natives here!
     <> vsep (map pTyDecl allTypes)
   , pretty "// State variables" <> line
-    <> vsep (map ((<>semi) . pVarDecl) $ M.elems globVars)
+    <> vsep (map ((<>semi) . pVarDecl) $ entries globVars)
   , pretty "// Function declarations" <> line
     <> vsep (map (pFunDecl . (!*) allFuncs) funDecls)
   , pretty "// Function definitions" <> line

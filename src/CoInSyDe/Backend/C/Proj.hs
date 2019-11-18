@@ -15,10 +15,10 @@ module CoInSyDe.Backend.C.Proj (
   Proj(..), buildProjStructure, getDependencies
   ) where
 
-import Data.List     as L
-import Data.Map.Lazy as M
-import Data.Text     as T
-import Data.Maybe    as J
+import Data.HashMap.Strict as M
+import Data.List           as L
+import Data.Maybe          as J
+import Data.Text           as T
 
 import CoInSyDe.Core
 import CoInSyDe.Core.Dict
@@ -34,7 +34,7 @@ data Proj = Proj { welcome  :: Text     -- ^ greeter message
                  , requmnts :: [Requ C] -- ^ set of requirements
                  , globVars :: IfMap C  -- ^ set of global variables
                  , allTypes :: [Type C] -- ^ set of types used
-                 , allFuncs :: Dict (Comp C)
+                 , allFuncs :: MapH (Comp C)
                  -- ^ dictionary with only the components used in building the
                  -- executable for 'mainFun'.
                  } deriving (Show)
@@ -44,18 +44,18 @@ greet = pack "// Generated with CoInSyDe : Code Synthesizer for System Design //
 emptyProj top = Proj greet top [] [] M.empty [] emptyDict
 
 -- | Builds a list of 'Proj' structure for each top module declared.
-buildProjStructure :: Dict (Comp C) -- ^ the /complete/ component database
+buildProjStructure :: MapH (Comp C) -- ^ the /complete/ component database
                    -> [Id]   -- ^ list with top module 'Id's
                    -> [Proj]
 buildProjStructure db = L.map (\n -> updateProj db (db !* n) (emptyProj n))
 
-traverseProj :: Dict (Comp C) -> Comp C -> Proj -> Proj
+traverseProj :: MapH (Comp C) -> Comp C -> Proj -> Proj
 traverseProj db cp@NvComp{} proj = updateProj db cp proj
 traverseProj db cp@TmComp{} proj =
   M.foldr (\n -> updateProj db (db !* n)) proj (M.map refId $ refs cp)
 
 
-updateProj :: Dict (Comp C) -> Comp C -> Proj -> Proj
+updateProj :: MapH (Comp C) -> Comp C -> Proj -> Proj
 updateProj db cp proj =
   go cp $ proj { welcome  = newWelcome
                , funDecls = newFunDecls cp
@@ -76,7 +76,7 @@ updateProj db cp proj =
     -- only non-foreign types need to be declared
     newTypes    = nub $ allTypes proj ++ L.filter canDeclare currTypes
     -- transfer component as-is
-    newFuncs    = dictTransfer (funName cp) db (allFuncs proj)
+    newFuncs    = dictTransfer (cpName cp) db (allFuncs proj)
     ---------- DIFFERENT BETWEEN COMPONENT TYPES ----------
     -- if it is a component, continue traversing the project
     go cp@TmComp{} = traverseProj db cp
@@ -87,7 +87,7 @@ updateProj db cp proj =
       ++ (L.map refId . M.elems . M.filter (not . inline)) (refs cp)
     -- in the case of native functions without source code, they are removed from the
     -- declaration list
-    newFunDecls cp@NvComp{} = maybe (L.delete (funName cp) (funDecls proj))
+    newFunDecls cp@NvComp{} = maybe (L.delete (cpName cp) (funDecls proj))
       (const $ funDecls proj) (funCode cp)
     ---------- AUXILLIARY FUNCTIONS ----------
     canDeclare x = not $ isForeign x || isPrimitive x || isArray x
