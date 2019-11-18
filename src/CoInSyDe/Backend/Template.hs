@@ -40,7 +40,7 @@ generateCode :: GingerContext SourcePos DocW Text
              -> Source -> DocW Text
 generateCode context tpl = do
   let options' = mkParserOptions (\_ -> return Nothing)
-      options = options' { poLStripBlocks = True
+      options = options' { poLStripBlocks = False
                          , poTrimBlocks = False}
   template <- either throw return =<< parseGinger' options tpl
   return $ runGinger context (optimize template)

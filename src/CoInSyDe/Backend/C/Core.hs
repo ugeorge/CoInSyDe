@@ -18,7 +18,7 @@ module CoInSyDe.Backend.C.Core (
   -- * 'Type' constructors
   mkPrimTy, mkEnumTy, mkStruct, mkArray, mkForeign,
   -- * 'If' (interface) constructors
-  mkGeneric, mkGlued, mkState, mkParam,
+  mkGeneric, mkState, mkParam,
   -- * Utilities
   isPrimitive,isForeign,isVoid,isArray,
   isInput,isOutput,isState,isVar,isMacro,isGet,isPut,
@@ -31,12 +31,9 @@ import CoInSyDe.Frontend
 
 import GHC.Generics (Generic)
 import Control.DeepSeq (NFData)
-import Data.Text (Text,pack,unpack,append,snoc)
+import Data.Text (Text,append,snoc)
 import Data.Text.Read
-import Data.List (intersperse)
 
-import Text.Read
-import Data.Maybe
 import Data.Aeson hiding (Array,Value)
 
 -- | Defines the family of C target languages. In particular it defines a set of types
@@ -77,15 +74,15 @@ instance Target C where
             | GlobVar {ifName :: Id, ifTy :: Type C, ifVal :: Value} 
             | InArg   {ifName :: Id, ifTy :: Type C, ifVal :: Value}
             | RetArg  {ifName :: Id, ifTy :: Type C, ifVal :: Value} 
-            | Get     {ifName :: Id, ifTy :: Type C, ifVal :: Value, ifGlue :: Name} 
-            | Put     {ifName :: Id, ifTy :: Type C, ifVal :: Value, ifGlue :: Name} 
+            | Get     {ifName :: Id, ifTy :: Type C, ifVal :: Value} 
+            | Put     {ifName :: Id, ifTy :: Type C, ifVal :: Value} 
             deriving (Read, Show, Generic, NFData)
   mkIf pId typeLib node =
-    case (node @! "class") of
+    case node @! "class" of
       "iarg"  -> mkGeneric InArg  typeLib node
       "oarg"  -> mkGeneric RetArg typeLib node
-      "iport" -> mkGlued Get typeLib node
-      "oport" -> mkGlued Put typeLib node
+      "iport" -> mkGeneric Get typeLib node
+      "oport" -> mkGeneric Put typeLib node
       "var"   -> mkGeneric LocVar typeLib node
       "state" -> mkState typeLib pId node
       "macro" -> mkParam node
@@ -152,13 +149,9 @@ getParam name nodes = head (filterByAttr "name" name nodes) @! "value"
 
 ------ INTERFACE CONSTRUCTORS ------
 
--- | Can make an 'InArg', 'RetArg', 'LocVar' respectively from
+-- | Can make an 'InArg', 'RetArg', 'Get', 'Put' or 'LocVar' respectively from
 --
--- > iport|oport[@class="arg",@name=*,@type=*,@?value=*,@?constructor=*]
---
--- or
---
--- > intern[@class="var",@name=*,@type=*,@?value=*,@?constructor=*]
+-- > interface[@class="iarg"|"oarg"|"iport"|"oport"|"var",@name=*,@type=*,@?value=*,@?constructor=*]
 mkGeneric cons tyLib node = cons name ty val
   where name = node @! "name"
         ty   = tyLib !* (node @! "type")
@@ -166,18 +159,6 @@ mkGeneric cons tyLib node = cons name ty val
                  (Nothing,Nothing) -> NoVal
                  (Just a, Nothing) -> Val a
                  (_, Just a)       -> Cons a
-
--- | Can make a 'Get' or 'Put' respectively from
---
--- > iport|oport[@class="extern",@name=*,@type=*,@mechanism=*,@?value=*,@?constructor=*]
-mkGlued cons tyLib node = cons name ty val glue
-  where name = node @! "name"
-        ty   = tyLib !* (node @! "type")
-        val  = case (node @? "value", node @? "constructor") of
-                 (Nothing,Nothing) -> NoVal
-                 (Just a, Nothing) -> Val a
-                 (_, Just a)       -> Cons a
-        glue = node @! "mechanism"
 
 -- | Makes a 'GlobVar' from a node
 --

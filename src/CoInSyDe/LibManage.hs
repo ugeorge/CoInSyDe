@@ -79,19 +79,19 @@ import Data.Text as T (Text,pack,splitOn,isPrefixOf)
 import qualified Data.Text.Lazy as TL (pack,unpack)
 import Data.Text.Lazy.Encoding (encodeUtf8,decodeUtf8)
 import Text.Pretty.Simple
-import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString as BS
 
 import CoInSyDe.Core
 import CoInSyDe.Core.Dict
 import CoInSyDe.Frontend
-import CoInSyDe.Frontend.XML (XML)
-import CoInSyDe.Frontend.JSON (JSON)
--- import CoInSyDe.Frontend.YAML (YAML)
+import CoInSyDe.Frontend.XML
+import CoInSyDe.Frontend.JSON
 
--- | Returns a path-wrapped frontend root node (e.g. XML root element). Should not be
--- used alone, but within a @case@ block to avoid ambiguous instances.
-readLibDoc :: FNode f => FilePath -> IO f
-readLibDoc path = B.readFile path >>= return . readDoc
+
+---------------------------------------------------------------------
+
+
 
 -- | Builds the path lists with all the library files used in loading the types,
 -- respectively component databases, according to the CoInSyDe library convention.
@@ -147,13 +147,13 @@ noNameDuplicates (paths,names)
 pathToNameList what path = 
   case takeExtension path of
     ".xml" -> do
-      xml <- readLibDoc path :: IO XML
+      xml <- readXML path
       return $ map (@!"name") $ childrenOf what xml
     ".json" -> do
-      json <- readLibDoc path :: IO JSON
+      json <- readJSON path
       return $ map (@!"name") $ childrenOf what json
     ".yaml" -> do
-      yaml <- readLibDoc path :: IO JSON
+      yaml <- readYAML path
       return $ map (@!"name") $ childrenOf what yaml
     _ -> return []
 
@@ -181,13 +181,13 @@ loadTypeLibs projF paths = foldM (catchL load) emptyDict paths >>=
   where
     load lib path = case takeExtension path of
       ".xml" -> do
-        xml <- readLibDoc path :: IO XML
+        xml <- readXML path
         return $ mkTypeLib lib path xml
       ".json" -> do
-        json <- readLibDoc path :: IO JSON
+        json <- readJSON path
         return $ mkTypeLib lib path json
       ".yaml" -> do
-        yaml <- readLibDoc path :: IO JSON
+        yaml <- readYAML path
         return $ mkTypeLib lib path yaml
       _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
 
@@ -235,13 +235,13 @@ loadCompDb' policy tyLib  = foldM (catchL load)
               
     load lib path = case takeExtension path of
       ".xml" -> do
-        xml <- readLibDoc path :: IO XML
+        xml <- readXML path
         return $ mkLib path lib xml
       ".json" -> do
-        json <- readLibDoc path :: IO JSON
+        json <- readJSON path 
         return $ mkLib path lib json
       ".yaml" -> do
-        yaml <- readLibDoc path :: IO JSON
+        yaml <- readYAML path
         return $ mkLib path lib yaml 
       _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
     
@@ -252,7 +252,7 @@ loadCompDb' policy tyLib  = foldM (catchL load)
 dumpLibObj :: Show a
            => FilePath  -- ^ dump directory
            -> a -> IO () 
-dumpLibObj path = B.writeFile path . encodeUtf8 . TL.pack . show
+dumpLibObj path = BL.writeFile path . encodeUtf8 . TL.pack . show
 
 -- | A prettier, human readable version of 'dumpLibObj'. The generated file __cannot
 -- be loaded__. Adds a @.dbg@ suffix, not to be confused with the normal @objdump@
@@ -261,12 +261,12 @@ dumpPrettyLibObj :: Show a
                  => FilePath  -- ^ dump directory
                  -> a -> IO () 
 dumpPrettyLibObj path
-  = B.writeFile (path ++ ".dbg") . encodeUtf8 . pShowOpt
+  = BL.writeFile (path ++ ".dbg") . encodeUtf8 . pShowOpt
     defaultOutputOptionsNoColor { outputOptionsIndentAmount = 2 }
 
 -- | Loads the content of a dictionary from an @objdump@ file. TODO: load from binary.
 loadLibObj :: Read b
            => FilePath  -- ^ load directory
            -> IO b
-loadLibObj path = liftM (read . TL.unpack . decodeUtf8) (B.readFile path)  
+loadLibObj path = liftM (read . TL.unpack . decodeUtf8) (BL.readFile path)  
 

@@ -62,11 +62,9 @@ template:
   - name: i
     class: iport
     type: Bool
-    mechanism: in_Read
   - name: o
     class: oport
     type: Int
-    mechanism: out_Write
   - name: fromBool
     class: var
     type: Int

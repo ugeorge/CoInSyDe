@@ -142,7 +142,7 @@ mkNativeLib policy fPath typeLib compLib = foldr load compLib . children "native
       = let name    = n @! "name"
             reqmnts = mkRequirements n
             interfs = mkIfs typeLib name n
-            code    = case (strip $ getTxt n,reqmnts) of
+            code    = case (getTxt n,reqmnts) of
                         ("",[]) -> error $ "Native node " ++ show name ++ " in file "
                                    ++ show fPath ++ ": code or requirement missing!"
                         ("",_)  -> Nothing
@@ -220,7 +220,7 @@ mkIfs typeLib parentId = mkMap . map mkEntry . children "interface"
 
 -- | Makes a container for 'refs' (check definition of 'TmFun') from all child nodes
 --
--- > <parent>/instance[@placeholder=*,@component=*,call="inline"|*]
+-- > <parent>/instance[@placeholder=*,@component=*,inline=true|false]
 --
 -- Uses 'mkBindings'.
 mkInstances :: (Target l, FNode f)

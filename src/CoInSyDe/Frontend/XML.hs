@@ -15,21 +15,20 @@ module CoInSyDe.Frontend.XML where
 
 import CoInSyDe.Frontend
 
+import Control.Exception (throw)
 import Text.XML.Light
-import Data.Maybe (fromMaybe)
-import Data.Text (pack)
+import Data.Text as T (pack,unpack,strip,lines,unlines,null)
 import Data.Text.Lazy as TL (unpack)
 import Text.Pretty.Simple (pShow)
-import Control.Exception (throw)
+import qualified Data.ByteString.Lazy as BL
 
 type XML = Element
 
 -- | XML 'Element' type from "Text.XML.Light".
 instance FNode Element where
   getInfo      = (++) "line ". maybe "_" show . elLine
-  getTxt       = pack . strContent
+  getTxt       = T.unlines . filter (not . T.null) . map T.strip . T.lines . T.pack . strContent
   children str = findChildren (qn str)
-  readDoc      = fromMaybe (throw EmptyFile) . parseXMLDoc
   getStrAttr attr n =
     case findAttr (qn attr) n of
       Just a  -> Right $ pack a
@@ -43,3 +42,7 @@ instance FNode Element where
                  
 qn name = blank_name {qName=name}
   
+readXML :: FilePath -> IO Element
+readXML path  = BL.readFile path >>= return . maybe (throw EmptyFile) id . parseXMLDoc
+
+

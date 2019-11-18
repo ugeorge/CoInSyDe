@@ -16,28 +16,23 @@ module CoInSyDe.Frontend.JSON where
 
 import CoInSyDe.Frontend
 
-import Control.Exception
+import Control.Exception (throw)
 import Data.Yaml
 import Data.Aeson
-import Data.Maybe (fromMaybe)
-import Data.Text (strip,pack)
+import Data.Text as T (pack,unpack,strip,lines,unlines,null)
 import Data.Text.Lazy as TL (unpack)
 import Data.Vector as V (toList)
-import Data.ByteString.Lazy (toStrict)
 import Data.HashMap.Strict as H (lookup)
 import Text.Pretty.Simple (pShow)
+import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString as BS
+
 
 type JSON = Object
 
 -- | JSON parser API
 instance FNode JSON where
   getInfo _      = "JSON"  -- Aeson does not have error reporting!
-  -- readDoc        = fromMaybe (throw EmptyFile) . decode
-  readDoc doc  =
-    case decodeEither' (toStrict doc) of
-      Left err -> throw $ ParseException "" $
-                  prettyPrintParseException err
-      Right a  -> a
   children str n =
     case H.lookup (pack str) n of
       Just (Object o) -> [o]
@@ -46,8 +41,8 @@ instance FNode JSON where
       Nothing         -> []
   getTxt n =
     case H.lookup "code" n of
-      Just (String a) -> strip a -- TODO: remove heading and trailing whitespaces
-      _               -> pack ""
+      Just (String a) ->  T.unlines . filter (not . T.null) . map T.strip . T.lines $ a
+      _               -> ""
   getStrAttr str n =
     case H.lookup (pack str) n of
       Just (String a) -> Right a
@@ -62,3 +57,12 @@ getObjects = map (\(Object c) -> c) . filter isObject
   where
     isObject (Object _) = True
     isObject _ = False
+
+readJSON :: FilePath -> IO Object
+readJSON path = BL.readFile path >>=
+                either (throw . ParseException "") return . eitherDecode'
+
+readYAML :: FilePath -> IO Object
+readYAML path = BS.readFile path >>=
+                either (throw . ParseException "" . prettyPrintParseException) return
+                . decodeEither'

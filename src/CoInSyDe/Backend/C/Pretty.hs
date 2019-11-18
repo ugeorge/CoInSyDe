@@ -18,6 +18,12 @@ import Data.Maybe
 import Text.Read (readMaybe)
 import Data.List (sort)
 
+data CDoc' a = CDoc' { currFunc :: Id
+                     , layout :: LayoutOptions
+                     , writer :: Text
+                     , action :: a
+                     } deriving (Show)
+
 type CDoc = Doc ()
 -------------------------------
 -- requirements generator
@@ -94,22 +100,6 @@ pVarDeclInit _ _ Macro{} = error "Gen: Macro should not be initialized!"
 pVarDeclInit db cp i = case ifTy i of
   (Array n b s) -> pretty (tyName b) <+> pVarN i <> brackets (pretty s)
   _ -> pVarT i <+> pVarN i <> pVarV db cp i
-
--- pPortSync :: MapH (Comp C) -> Comp C -> If C -> CDoc
--- pPortSync db cp i@Get{} = pVarFunCall db cp (ifGlue i) 
--- pPortSync db cp i@Put{} = pVarFunCall db cp (ifGlue i)
--- pPortSync _ _ i = error $ "Gen: Interface " ++ show (ifName i)
---                   ++ " is not a get/put port, so it cannot sync!"
-  
----------------------
--- interface queries
----------------------
-
-ifQuery db cp cIfs name []        = pretty $ ifName (cIfs !?! name)
-ifQuery db cp cIfs name ["type"]  = pretty $ (tyName . ifTy) (cIfs !?! name)
-ifQuery db cp cIfs name ["value"] = case cIfs !?! name of
-                                      Macro _ val -> pretty val
-                                      x -> pVarV db cp x
 
 -------------------------------
 -- function code generator
@@ -216,7 +206,6 @@ pFunCode db cIfs cRefs = pretty . fst . W.runWriter . generateCode (mkContext ge
       where (Ref rId rInline rBoundIfs) = cRefs !?! n
             rComp      = db !* rId
             rBoundRefs = replace (refs rComp) rBoundIfs
-            -- rBoundIfs' = M.union rBoundIfs (ifs rComp)  -- raises child's interfaces
             replace rRefs rBIfs =
               let replaceIf intf = rBIfs !?! ifName intf
               in M.map (\(Ref n i b)->Ref n i (M.map replaceIf b)) rRefs
@@ -225,24 +214,3 @@ pFunCode db cIfs cRefs = pretty . fst . W.runWriter . generateCode (mkContext ge
 renderText n = renderStrict (layoutPretty defaultLayoutOptions n)
 
 getPHs = filter (\x -> isJust (readMaybe (unpack x) :: Maybe Int))
- 
--- pFunCode :: MapH (Comp C)
---          -> Comp C
---          -> IfMap C
---          -> InstMap C
---          -> String -- template
---          -> CDoc
--- pFunCode db cp cIfs cRefs = fillCat . map generate
---   where
---     generate (TCode str) = pretty $ replace (pack "¤") (pack "\n") str
---     generate (TPort n q) = ifQuery db cp cIfs n q
---     generate (TFun  n _) -- TODO: for now query is ignored 
---       | rInline   = nest 4 $
---                     pFunCode db rComp rBoundIfs rBoundRefs (template rComp)
---       | otherwise = pFunCall rBoundIfs rComp
---       where (Ref rId rInline rBoundIfs) = cRefs !?! n
---             rComp      = db !* rId
---             rBoundRefs = replace (refs rComp) rBoundIfs
---             replace rRefs rBIfs =
---               let replaceIf intf = rBIfs !?! ifName intf
---               in M.map (\(Ref n i b)->Ref n i (M.map replaceIf b)) rRefs
