@@ -73,7 +73,7 @@ data Comp l where
            , refs     :: InstMap l-- ^ maps a (template) function placeholder 'TFun'
                                   --   to an existing component, along with its new
                                   --   interface bindings
-           , template :: Text     -- ^ template code
+           , template :: String   -- ^ template code
            } -> Comp l
   -- | Native functional. Code used \"as-is\", no manipulation done.
   NvComp :: Target l =>

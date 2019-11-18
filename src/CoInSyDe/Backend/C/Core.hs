@@ -39,6 +39,8 @@ import Data.Map.Lazy as M hiding (map,filter,take)
 
 import Text.Read
 import Data.Maybe
+import Data.Aeson
+
 -- | Defines the family of C target languages. In particular it defines a set of types
 -- (see 'Type C'), a set of interfaces (see 'If C') and a set of requirements (see
 -- 'Requ C'), by instantiating the 'Target' type class.
@@ -50,7 +52,6 @@ data Value = NoVal      -- ^ no initialization
            | Cons Name  -- ^ points to constructor referenced in the parent
                         -- component's 'InstMap'
            deriving (Show, Read, Generic, NFData)
-
 
 -----------------------------------------------------------------
 instance Target C where
@@ -82,21 +83,26 @@ instance Target C where
             | Put     {ifName :: Id, ifTy :: Type C, ifVal :: Value, ifGlue :: Name} 
             deriving (Read, Show, Generic, NFData)
   mkIf pId typeLib node =
-    case (getName node, node @! "class") of
-      ("iport","arg")    -> mkGeneric InArg  typeLib node
-      ("oport","arg")    -> mkGeneric RetArg typeLib node
-      ("iport","extern") -> mkGlued Get typeLib node
-      ("oport","extern") -> mkGlued Put typeLib node
-      ("intern","var")   -> mkGeneric LocVar typeLib node
-      ("intern","state") -> mkState typeLib pId node
-      ("intern","macro") -> mkParam node
+    case (node @! "class") of
+      "iarg"  -> mkGeneric InArg  typeLib node
+      "oarg"  -> mkGeneric RetArg typeLib node
+      "iport" -> mkGlued Get typeLib node
+      "oport" -> mkGlued Put typeLib node
+      "var"   -> mkGeneric LocVar typeLib node
+      "state" -> mkState typeLib pId node
+      "macro" -> mkParam node
       x -> error $ "Glue of type " ++ show x ++ " is not recognized!"
   mkMacro = Macro "__intern__"
 
   data Requ C = Include Text deriving (Read, Show, Eq, Generic, NFData)
   mkRequ node = Include (node @! "include")
 
+instance ToJSON (Type C)  where toEncoding = genericToEncoding defaultOptions
+instance ToJSON (If C)    where toEncoding = genericToEncoding defaultOptions
+instance ToJSON (IfMap C) where toEncoding = genericToEncoding defaultOptions
+
 -----------------------------------------------------------------
+
 
 ------ TYPE CONSTRUCTORS ------
 

@@ -1,5 +1,5 @@
 {-# OPTIONS_HADDOCK hide #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, TypeSynonymInstances, FlexibleInstances #-}
 ----------------------------------------------------------------------
 -- |
 -- Module      :  CoInSyDe.Frontend.JSON
@@ -17,63 +17,41 @@ module CoInSyDe.Frontend.JSON where
 import CoInSyDe.Frontend
 
 import Control.Exception
-import Control.Monad
 import Data.Aeson
-import Data.Aeson.Types 
 import Data.Maybe (fromMaybe)
-import Data.Text (Text, pack, unpack)
+import Data.Text (pack)
+import Data.Text.Lazy as TL (unpack)
 import Data.Vector as V (toList)
-import Data.HashMap.Strict as H (toList)
+import Data.HashMap.Strict as H (lookup)
+import Text.Pretty.Simple
 
--- | Hacky way to mimic XML nodes. JSON 'Value' does not have info about the node
--- name, but we store it in a record.
-data JSON = Node   { jsonName :: !Text, jsonContent :: [JSON]}
-          | Attrib { jsonName :: !Text, jsonValue :: !Text}
-          deriving Show
-
-
-instance FromJSON JSON where
-  parseJSON v@(Object _) = go "root" v
-    where
-      go :: Text -> Value -> Parser JSON
-      go n (Object q) = Node n <$> mapM (\(k,a) -> go k a) cList
-        where cList = filter (not . isArray) (H.toList q) ++
-                      concatMap fromArray (filter isArray $ H.toList q)
-              isArray (_, Array _) = True
-              isArray _ = False
-              fromArray (k, Array a) = map ((,) k) $ V.toList a
-              fromArray _ = error "Critical: I thought I filtered you!"
-      go n  (String s)  = return $ Attrib n s
-      go _ x = error $ "JSON Critical: cannot parse " ++ show x
-  parseJSON _ = mzero
-
+type JSON = Object
 
 -- | JSON parser API
 instance FNode JSON where
   getInfo _      = "JSON"  -- Aeson does not have error reporting!
-  children str n = case n of
-                     Node _ c   -> filter (\n -> jsonName n == pack str) c
-                     Attrib n _ -> error $ show n ++ " is an attribute, not a node!"
-  getTxt n       = case children "code" n of
-                     [Attrib _ a]  -> a
-                     _             -> pack "" 
-  getName        = unpack . jsonName
   readDoc        = fromMaybe (throw EmptyFile) . decode
-  getAttr attr n = case children attr n of
-                     [Attrib _ a]  -> Right a
-                     _ -> Left $ "cannot find attribute " ++ show attr ++
-                          " in node of type " ++ show (jsonName n)
+  children str n =
+    case H.lookup (pack str) n of
+      Just (Object o) -> [o]
+      Just (Array a)  -> getObjects $ V.toList a
+      Just _          -> error $ show str ++ " is an attribute, not a node!"
+      Nothing         -> []
+  getTxt n =
+    case H.lookup "code" n of
+      Just (String a) -> a
+      _               -> pack ""
+  getStrAttr str n =
+    case H.lookup (pack str) n of
+      Just (String a) -> Right a
+      _               -> Left $ "cannot find attribute " ++ show str ++
+                         " in node\n " ++ (TL.unpack $ pShow n)
+  getBoolAttr str n =
+    case H.lookup (pack str) n of
+      Just (Bool a) -> Right a
+      _             -> Left $ "cannot find boolean " ++ show str 
 
--- -- OLD STUFF
--- instance FromJSON JSON1 where
---   parseJSON v@(Object _) = go "root" v
---     where
---       go :: Text -> Value -> Parser JSON1
---       go n o@(Object q) = withObject "Children" (\obj ->
---          fmap (Node n) . forM (H.toList obj) $ \(n,v) -> go n v) o
---       go n  (String s)  = return $ Attrib n s
---       go n a@(Array _)  = withArray "Children" (\obj ->
---         fmap (Node  n) . forM (V.toList obj) $ \v -> go n v) a
---       go _ x = error $ "JSON Critical: cannot parse " ++ show x
---   parseJSON _ = mzero
-
+getObjects = map (\(Object c) -> c) . filter isObject
+  where
+    isObject (Object _) = True
+    isObject _ = False

@@ -38,10 +38,10 @@ class Show f => FNode f where
   readDoc  :: ByteString -> f
   -- | Returns a list with all the child nodes with a certain name
   children :: String  -> f -> [f]
-  -- | Get name
-  getName :: f -> String
   -- | Returns either the value of a certain attribute or a specific error message.
-  getAttr  :: String -> f -> Either String Text
+  getStrAttr :: String -> f -> Either String Text
+  -- | Gets the text content from a node.
+  getBoolAttr :: String -> f -> Either String Bool
   -- | Gets the text content from a node.
   getTxt :: f -> Text
   -- | Gets info about element as string
@@ -51,18 +51,24 @@ class Show f => FNode f where
 (|=) :: FNode f => f -> String -> [f]
 node |= name = children name node
 
--- | Maybe-wrapped infix operator for 'getAttr'.
+-- | Maybe-wrapped infix operator for 'getStrAttr'.
 (@?) :: FNode f => f -> String -> Maybe Text
-node @? attr = case getAttr attr node of
+node @? attr = case getStrAttr attr node of
                  Right val -> Just val
                  Left _    -> Nothing
 
--- | Unsafe infix operator for 'getAttr'. Throws a 'ParseException' in case attribute not
--- found.
+-- | Unsafe infix operator for 'getStrAttr'. Throws a 'ParseException' in
+-- case attribute not found.
 (@!) :: FNode f => f -> String -> Text
-node @! attr = case getAttr attr node of
+node @! attr = case getStrAttr attr node of
                  Right val -> val
                  Left  msg -> throw (ParseException (getInfo node) msg)
+
+-- | Same as 'getBoolAttr' but with the default set to 'False'.
+(@^) :: FNode f => f -> String -> Bool
+node @^ attr = case getBoolAttr attr node of
+                 Right val -> val
+                 Left  _   -> False
 
 -- | Same as 'children', but looks for several node names instead of just one.
 childrenOf :: FNode f => [String] -> f -> [f]
@@ -70,7 +76,7 @@ childrenOf names node = concatMap (`children` node) names
 
 -- | Predicate function for testing if an atribute exists and has a certain value.
 hasValue :: FNode f => String -> String -> f -> Bool
-hasValue attr val node = case getAttr attr node of
+hasValue attr val node = case getStrAttr attr node of
                            Right f -> pack val == f
                            Left  _ -> False
 

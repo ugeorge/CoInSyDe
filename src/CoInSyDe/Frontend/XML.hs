@@ -14,25 +14,32 @@
 module CoInSyDe.Frontend.XML where
 
 import CoInSyDe.Frontend
-import Data.Text (pack)
+
 import Text.XML.Light
-import Control.Exception (throw)
 import Data.Maybe (fromMaybe)
+import Data.Text (pack)
+import Data.Text.Lazy as TL (unpack)
+import Text.Pretty.Simple (pShow)
+import Control.Exception (throw)
 
 type XML = Element
 
 -- | XML 'Element' type from "Text.XML.Light".
 instance FNode Element where
-  getInfo        = (++) "line ". maybe "_" show . elLine
-  getTxt         = pack . strContent
-  getName        = qName . elName
-  children str   = findChildren (qn str)
-  readDoc        = fromMaybe (throw EmptyFile) . parseXMLDoc
-  getAttr attr n =
+  getInfo      = (++) "line ". maybe "_" show . elLine
+  getTxt       = pack . strContent
+  children str = findChildren (qn str)
+  readDoc      = fromMaybe (throw EmptyFile) . parseXMLDoc
+  getStrAttr attr n =
     case findAttr (qn attr) n of
-      Just a -> Right $ pack a
+      Just a  -> Right $ pack a
       Nothing -> Left $ "cannot find attribute " ++ show attr ++
-                 " in node of type " ++ show (getName n)
-
+                 " in node\n " ++ (TL.unpack $ pShow n)
+  getBoolAttr attr n =
+    case findAttr (qn attr) n of
+      Just a  -> Right $ a == "true" || a == "TRUE" || a = "yes" || a = "YES"
+      Nothing -> Left $ "cannot find attribute " ++ show attr ++
+                 " in node\n " ++ (TL.unpack $ pShow n)
+                 
 qn name = blank_name {qName=name}
   
