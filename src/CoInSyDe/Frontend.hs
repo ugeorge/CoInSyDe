@@ -28,7 +28,6 @@ instance Exception FrontendException
 
 instance Show FrontendException where
   show (ParseException info msg) = "Parse exception (" ++ info ++ "): " ++ msg
-  -- show (TemplateException msg)   = "Template exception: " ++ msg
   show EmptyFile = "Empty file!" 
 
 -- | This is a minimal implementation for a tree-like object parser. The only type

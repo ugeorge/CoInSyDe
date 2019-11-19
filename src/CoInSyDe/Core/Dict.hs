@@ -13,7 +13,7 @@
 ----------------------------------------------------------------------
 module CoInSyDe.Core.Dict (
   -- * CoInSyDe 'Map' Type
-  Id, Map, mkMap, ids, entries, (!?!),
+  Id, Map, mkMap, ids, entries, idEntries, (!?!),
   -- * History-Bookkeeping Map
   MapH, Info(..), Policy(..),
   emptyDict, mkDict, mkInfoNode, (!*), (!^),
@@ -69,6 +69,8 @@ infixl 9 !*, !^, !?!
 ids = M.keys
 
 entries = M.elems
+
+idEntries = M.toList
 
 mkMap :: (Eq k, Hashable k) => [(k,t)] -> Map k t
 mkMap = M.fromList

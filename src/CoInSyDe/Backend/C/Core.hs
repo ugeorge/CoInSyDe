@@ -20,19 +20,20 @@ module CoInSyDe.Backend.C.Core (
   -- * 'If' (interface) constructors
   mkGeneric, mkState, mkParam,
   -- * Utilities
-  isPrimitive,isForeign,isVoid,isArray,
-  isInput,isOutput,isState,isVar,isMacro,isGet,isPut,
-  getTypeOf,getOutput
+  SepIfs(..), sepIfs,
+  isPrimitive,isForeign,isVoid,isArray,isMacro,isGlobal,getTypeOf
   ) where
 
 import CoInSyDe.Core
 import CoInSyDe.Core.Dict
 import CoInSyDe.Frontend
+import CoInSyDe.Backend.Template (Gen, throwError)
 
 import GHC.Generics (Generic)
 import Control.DeepSeq (NFData)
 import Data.Text (Text,append,snoc)
 import Data.Text.Read
+import Data.List (sortOn)
 
 import Data.Aeson hiding (Array,Value)
 
@@ -47,6 +48,9 @@ data Value = NoVal      -- ^ no initialization
            | Cons Name  -- ^ points to constructor referenced in the parent
                         -- component's 'InstMap'
            deriving (Show, Read, Generic, NFData)
+
+data Kind = LocVar | GlobVar | InArg | OutArg | RetArg | Get | Put
+          deriving (Show,Read,Eq,Ord,Generic,NFData)
 
 -----------------------------------------------------------------
 instance Target C where
@@ -69,18 +73,14 @@ instance Target C where
           parameters   = node |= "parameter"
           requirements = node |= "requirement"
           
-  data If C = Macro   {ifName :: Id, macroVal :: Text}
-            | LocVar  {ifName :: Id, ifTy :: Type C, ifVal :: Value}
-            | GlobVar {ifName :: Id, ifTy :: Type C, ifVal :: Value} 
-            | InArg   {ifName :: Id, ifTy :: Type C, ifVal :: Value}
-            | RetArg  {ifName :: Id, ifTy :: Type C, ifVal :: Value} 
-            | Get     {ifName :: Id, ifTy :: Type C, ifVal :: Value} 
-            | Put     {ifName :: Id, ifTy :: Type C, ifVal :: Value} 
+  data If C = Macro    {ifName :: Id, macroVal :: Text}
+            | Variable {ifName :: Id, ifKind :: Kind, ifTy :: Type C, ifVal :: Value}
             deriving (Read, Show, Generic, NFData)
   mkIf pId typeLib node =
     case node @! "class" of
       "iarg"  -> mkGeneric InArg  typeLib node
-      "oarg"  -> mkGeneric RetArg typeLib node
+      "oarg"  -> mkGeneric OutArg typeLib node
+      "ret"   -> mkGeneric RetArg typeLib node
       "iport" -> mkGeneric Get typeLib node
       "oport" -> mkGeneric Put typeLib node
       "var"   -> mkGeneric LocVar typeLib node
@@ -93,6 +93,7 @@ instance Target C where
   mkRequ node = Include (node @! "include")
 
 instance ToJSON Value     where toEncoding = genericToEncoding defaultOptions
+instance ToJSON Kind      where toEncoding = genericToEncoding defaultOptions
 instance ToJSON (Requ C)  where toEncoding = genericToEncoding defaultOptions
 instance ToJSON (Type C)  where toEncoding = genericToEncoding defaultOptions
 instance ToJSON (If C)    where toEncoding = genericToEncoding defaultOptions
@@ -151,8 +152,10 @@ getParam name nodes = head (filterByAttr "name" name nodes) @! "value"
 
 -- | Can make an 'InArg', 'RetArg', 'Get', 'Put' or 'LocVar' respectively from
 --
--- > interface[@class="iarg"|"oarg"|"iport"|"oport"|"var",@name=*,@type=*,@?value=*,@?constructor=*]
-mkGeneric cons tyLib node = cons name ty val
+-- > interface[@class=<class>,@name=*,@type=*,@?value=*,@?constructor=*]
+--
+-- where @<class>@ can be @"iarg"|"oarg"|"ret"|"iport"|"oport"|"var"@
+mkGeneric kind tyLib node = Variable name kind ty val
   where name = node @! "name"
         ty   = tyLib !* (node @! "type")
         val  = case (node @? "value", node @? "constructor") of
@@ -163,7 +166,7 @@ mkGeneric cons tyLib node = cons name ty val
 -- | Makes a 'GlobVar' from a node
 --
 -- > intern[@class="state",@name=*,@type=*,@value=*]
-mkState tyLib parentId node = GlobVar name ty val
+mkState tyLib parentId node = Variable name GlobVar ty val
   where name = (parentId `snoc` '_') `append` (node @! "name")
         ty   = tyLib !* (node @! "type")
         val  = maybe NoVal Val $ node @? "value"
@@ -185,31 +188,35 @@ isVoid _              = False
 isArray Array{}       = True
 isArray _             = False
 
-isInput InArg{}   = True
-isInput _         = False
-isOutput RetArg{} = True
-isOutput _        = False
-isState GlobVar{} = True
-isState _         = False
-isVar LocVar{}    = True
-isVar _           = False
-isMacro Macro{}   = True
-isMacro _         = False
-isGet Get{}       = True
-isGet _           = False
-isPut Put{}       = True
-isPut _           = False
-
+isMacro Macro{} = True
+isMacro _       = False
+isGlobal v@Variable{} = ifKind v == GlobVar
+isGlobal _ = False
 
 getTypeOf Macro{} = Nothing
 getTypeOf interf  = Just $ ifTy interf
 
--- | Assures that a component has at most one 'RetArg'. If none is found, it creates a
--- @void@ 'RetArg', used in function definition headers.
-getOutput n ps = case filter isOutput ps of
-                   []  -> RetArg {ifName = "__OUT_",
-                                  ifTy   = NoTy "void",
-                                  ifVal  = NoVal} 
-                   [a] -> a
-                   xs  -> error $ "Gen: Function " ++ show n ++ " has more than " ++
-                          "one return argument:\n" ++ show xs
+
+-- Interface separator. Does a lot of plumbing when it comes to returning the interfaces
+data SepIfs = Sep {
+  iarg  :: [If C], oarg :: [If C], ret   ::  If C,  iport :: [If C],
+  oport :: [If C], var  :: [If C], state :: [If C], macro :: [If C]
+  } deriving (Show)
+sepIfs :: IfMap C -> Gen C SepIfs
+sepIfs is = do
+  ret <- retArg
+  return $ Sep iarg oarg ret iport oport var state macro
+  where
+    (macro,vars) = (filter isMacro $ entries is, filter (not . isMacro) $ entries is)
+    iarg  = sortOn ifName $ filter ((==InArg) . ifKind) vars
+    oarg  = sortOn ifName $ filter ((==OutArg) . ifKind) vars
+    iport = filter ((==Get) . ifKind) vars
+    oport = filter ((==Put) . ifKind) vars
+    var   = filter ((==LocVar) . ifKind) vars
+    state = filter ((==GlobVar) . ifKind) vars
+    retArg= getOutput =<< return (filter ((==RetArg) . ifKind) vars)
+    --------------------------------------------
+    getOutput []  = return $ Variable "__OUT_" RetArg (NoTy "void") NoVal
+    getOutput [a] = return a
+    getOutput xs  = throwError $ "C cannot return more than one argument:\n"
+                          ++ show xs
