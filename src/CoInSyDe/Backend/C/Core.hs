@@ -14,26 +14,23 @@
 -- their constructors.
 ----------------------------------------------------------------------
 module CoInSyDe.Backend.C.Core (
-  C(..), Type(..), If(..), Requ(..), Value(..),
+  C(..), Type(..), If(..), Requ(..), Value(..), Kind(..),
   -- * 'Type' constructors
   mkPrimTy, mkEnumTy, mkStruct, mkArray, mkForeign,
   -- * 'If' (interface) constructors
   mkGeneric, mkState, mkParam,
   -- * Utilities
-  SepIfs(..), sepIfs,
   isPrimitive,isForeign,isVoid,isArray,isMacro,isGlobal,getTypeOf
   ) where
 
 import CoInSyDe.Core
 import CoInSyDe.Core.Dict
 import CoInSyDe.Frontend
-import CoInSyDe.Backend.Template (Gen, throwError)
 
 import GHC.Generics (Generic)
 import Control.DeepSeq (NFData)
 import Data.Text (Text,append,snoc)
 import Data.Text.Read
-import Data.List (sortOn)
 
 import Data.Aeson hiding (Array,Value)
 
@@ -57,8 +54,9 @@ instance Target C where
   data Type C = PrimTy  {tyName :: Id} 
               | EnumTy  {tyName :: Id, enumVals  :: [(Text, Maybe Text)]}
               | Struct  {tyName :: Id, sEntries  :: Map Text (Type C)}
-              | Array   {tyName :: Id, arrBaseTy :: Type C, arrSize :: Int}
-              | Foreign {tyName :: Id, tyRequ    :: [Requ C]}
+              | Array   {arrBaseTy :: Type C, arrSize :: Int}
+              | Foreign {tyName :: Id, oCallPrefix :: Text, oBindPrefix :: Text,
+                         tyRequ :: [Requ C]}
               | NoTy    {tyName :: Id} -- ^ will always be void
               deriving (Read, Show, Eq, Generic, NFData)
   mkType _ typeLib node =
@@ -66,7 +64,7 @@ instance Target C where
       "primitive" -> mkPrimTy targetName
       "enum"      -> mkEnumTy targetName parameters
       "struct"    -> mkStruct typeLib targetName parameters
-      "array"     -> mkArray  typeLib targetName parameters
+      "array"     -> mkArray  typeLib parameters
       "foreign"   -> mkForeign targetName requirements
       x -> error $ "Type class " ++ show x ++ " is not recognized!"
     where targetName   = node @! "targetName"
@@ -92,11 +90,11 @@ instance Target C where
   data Requ C = Include Text deriving (Read, Show, Eq, Generic, NFData)
   mkRequ node = Include (node @! "include")
 
+-----------------------------------------------------------------
+
 instance ToJSON Value     where toEncoding = genericToEncoding defaultOptions
-instance ToJSON Kind      where toEncoding = genericToEncoding defaultOptions
 instance ToJSON (Requ C)  where toEncoding = genericToEncoding defaultOptions
 instance ToJSON (Type C)  where toEncoding = genericToEncoding defaultOptions
-instance ToJSON (If C)    where toEncoding = genericToEncoding defaultOptions
 
 -----------------------------------------------------------------
 
@@ -125,10 +123,10 @@ mkStruct tyLib tName pNodes = Struct tName (mkMap $ map extract pNodes)
 
 -- | Makes an 'Array' from a node
 --
--- > type[@name=*,@class="array",@targetName=*]
+-- > type[@name=*,@class="array"]
 -- > - parameter[@name="baseType",@value=*]
 -- > - parameter[@name="size",@value=*]
-mkArray tyLib tName pNodes = Array tName baseTy size
+mkArray tyLib pNodes = Array baseTy size
   where baseTy  = tyLib !* getParam "baseType" pNodes
         size    = fst $ either error id $ decimal $ getParam "size" pNodes
 
@@ -136,8 +134,11 @@ mkArray tyLib tName pNodes = Array tName baseTy size
 --
 -- > type[@name=*,@class="foreign",@targetName=*]
 -- > + requirement[@include=*]
-mkForeign tName = Foreign tName . map mkRequ
+mkForeign tName pNodes = Foreign tName cPrefix bPrefix $ map mkRequ pNodes
+  where cPrefix = getParam' "callPrefix" pNodes
+        bPrefix = getParam' "bindPrefix" pNodes
 
+    
 -- -- | Makes a 'PtrTy' type from a node
 -- --
 -- -- > type[@name=*,@class="pointer",@targetName=*]
@@ -147,6 +148,10 @@ mkForeign tName = Foreign tName . map mkRequ
 --         tName   = tyName baseTy
                 
 getParam name nodes = head (filterByAttr "name" name nodes) @! "value"
+getParam' name nodes = case filterByAttr "name" name nodes of
+  []  -> ""
+  [x] -> x @! "value"
+
 
 ------ INTERFACE CONSTRUCTORS ------
 
@@ -197,26 +202,3 @@ getTypeOf Macro{} = Nothing
 getTypeOf interf  = Just $ ifTy interf
 
 
--- Interface separator. Does a lot of plumbing when it comes to returning the interfaces
-data SepIfs = Sep {
-  iarg  :: [If C], oarg :: [If C], ret   ::  If C,  iport :: [If C],
-  oport :: [If C], var  :: [If C], state :: [If C], macro :: [If C]
-  } deriving (Show)
-sepIfs :: IfMap C -> Gen C SepIfs
-sepIfs is = do
-  ret <- retArg
-  return $ Sep iarg oarg ret iport oport var state macro
-  where
-    (macro,vars) = (filter isMacro $ entries is, filter (not . isMacro) $ entries is)
-    iarg  = sortOn ifName $ filter ((==InArg) . ifKind) vars
-    oarg  = sortOn ifName $ filter ((==OutArg) . ifKind) vars
-    iport = filter ((==Get) . ifKind) vars
-    oport = filter ((==Put) . ifKind) vars
-    var   = filter ((==LocVar) . ifKind) vars
-    state = filter ((==GlobVar) . ifKind) vars
-    retArg= getOutput =<< return (filter ((==RetArg) . ifKind) vars)
-    --------------------------------------------
-    getOutput []  = return $ Variable "__OUT_" RetArg (NoTy "void") NoVal
-    getOutput [a] = return a
-    getOutput xs  = throwError $ "C cannot return more than one argument:\n"
-                          ++ show xs

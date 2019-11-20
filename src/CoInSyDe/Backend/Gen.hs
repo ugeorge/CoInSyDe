@@ -1,5 +1,5 @@
 {-# LANGUAGE FlexibleContexts, OverloadedStrings #-}
-module CoInSyDe.Backend.Template where
+module CoInSyDe.Backend.Gen where
 
 import           Control.Exception
 import           Control.Monad.Writer.Lazy as W
@@ -17,7 +17,7 @@ import CoInSyDe.Core
 import CoInSyDe.Core.Dict
 
 import Control.Monad.State.Lazy
-import Data.Text.Prettyprint.Doc
+-- import Control.Monad.Except
 import Data.Typeable (Typeable)
 
 data GeneratorException
@@ -36,32 +36,49 @@ instance Show GeneratorException where
     ++ " with load history :\n->" ++ concatMap ((++"\n   ") . show) hist
     ++ "What's wrong: " ++ msg
 
-type Gen l a = State (GenS l) a
+-- TODO: use Either as exception monad
+type Gen o l a = State (GenS o l) a
 
-data GenS l = DocS { stage  :: Text
-                   , cpDb   :: MapH (Comp l)
-                   , layout :: LayoutOptions
-                   } deriving (Show)
+data GenS opt l = GenS { stage  :: Text
+                       , cpDb   :: MapH (Comp l)
+                       , layout :: opt
+                       } deriving (Show)
 
-writeDoc s stg f = execState f (s {stage = stg})
+genDoc s stg f = evalState f (s {stage = stg})
 
-getCp :: Target l => Gen l (Comp l)
+genDoc' = flip evalState
+
+
+getState :: Target l => Gen o l (GenS o l)
+getState = get
+
+getCp :: Target l => Gen o l (Comp l)
 getCp = get >>= \s -> return (cpDb s !* stage s)
 
-getCpAndDb :: Target l => Gen l (Comp l, MapH (Comp l))
+getDb :: Target l => Gen o l (MapH (Comp l))
+getDb = get >>= \s -> return (cpDb s)
+
+getCpAndDb :: Target l => Gen o l (Comp l, MapH (Comp l))
 getCpAndDb = get >>= \s -> return (cpDb s !* stage s, cpDb s)
 
-throwCritical :: String -> Gen l a
+getLayout :: Target l => Gen o l o
+getLayout = get >>= \s -> return (layout s)
+
+changeStage :: Target l => Id -> Gen o l ()
+changeStage x = get >>= \s -> put (s {stage = x})
+
+
+throwCritical :: String -> Gen o l a
 throwCritical msg = do
   s <- get
   throw $ CriticalGen (stage s) msg
 
-throwError :: String -> Gen l a
+throwError :: String -> Gen o l a
 throwError msg = do
   s <- get
   throw $ ErrorGen (stage s) [] msg
 
-throwErrorH :: Target l => String -> Gen l a
+throwErrorH :: Target l => String -> Gen o l a
 throwErrorH msg = do
   s <- get
   let cpId = stage s
@@ -92,12 +109,14 @@ mkContext f d = makeContextText
             ++ " not found in dictionary:\n"
             ++ (B.unpack $ encodePretty defConfig d)
 
-generateCode :: TplContext
-             -> Source -> (Writer Text) Text
+generateCode :: Target l => TplContext
+             -> Source -- -> (Writer Text) Text
+             -> Gen o l Text
 generateCode context tpl = do
   let options' = mkParserOptions (\_ -> return Nothing)
-      options = options' { poLStripBlocks = True
+      options = options' { poKeepTrailingNewline = False
+                         , poLStripBlocks = False
                          , poTrimBlocks = False}
-  template <- either throw return =<< parseGinger' options tpl
-  return $ runGinger context (optimize template)
+  template <- either (throwErrorH . show) return =<< parseGinger' options tpl
+  return $ runGinger context (optimize template) 
 

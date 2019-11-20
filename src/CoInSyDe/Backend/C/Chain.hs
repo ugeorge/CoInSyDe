@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 ----------------------------------------------------------------------
 -- |
 -- Module      :  CoInSyDe.Backend.C.Chain
@@ -15,29 +16,32 @@
 ----------------------------------------------------------------------
 module CoInSyDe.Backend.C.Chain where
 
+
 import CoInSyDe.Core.Dict
+import CoInSyDe.Backend.Gen
 import CoInSyDe.Backend.C.Proj
 import CoInSyDe.Backend.C.Pretty
 
--- import Prelude hiding ((<>))
--- import Text.PrettyPrint
 import Data.Text.Prettyprint.Doc 
 
 -- | Generates Bare-Metal C code from a built C project spec.
-generateCode (Proj welcome top funDecls requmnts globVars allTypes allFuncs) =
+generateCode opts (Proj welcome top funDecls requmnts globVars allTypes allFuncs) =
   (vsep . punctuate hardline)
   [ pretty welcome
-  , pretty "// Included libraries" <> line
-    <> vsep (map pInclude requmnts)
-  , pretty "// Custom types" <> line
-  -- TODO: Include natives here!
-    <> vsep (map pTyDecl allTypes)
-  , pretty "// State variables" <> line
-    <> vsep (map ((<>semi) . pVarDecl) $ entries globVars)
-  , pretty "// Function declarations" <> line
-    <> vsep (map (pFunDecl . (!*) allFuncs) funDecls)
-  , pretty "// Function definitions" <> line
-    <> vsep (map (pFunDef allFuncs . (!*) allFuncs) funDecls)
-  , pretty "// Main function" <> line
-    <> pMainFunc allFuncs globVars (allFuncs !* top)
+  , "// Included libraries" <> line
+    <> vsep (mapGen "requirements" pInclude requmnts)
+  , "// Custom types" <> line
+    <> vsep (mapGen "type declaratons" pTyDecl allTypes)
+  , "// State variables" <> line
+    <> vsep (mapGen "global variable decl" (semiM pVDecl) $ entries globVars)
+  , "// Function declarations" <> line
+    <> vsep (mapGenCp pFunDecl funDecls)
+  , "// Function definitions" <> line
+    <> vsep (mapGenCp pFunDef funDecls)
+  , "// Main function" <> line
+    <> genDoc state top (pMainDef globVars $ allFuncs !* top)
   ] <> hardline
+  where
+    state = GenS { stage = "", cpDb = allFuncs, layout = opts }
+    mapGen s f = map (genDoc state s . f)
+    mapGenCp f = map (\x -> genDoc state x $ f (cpDb state !* x))

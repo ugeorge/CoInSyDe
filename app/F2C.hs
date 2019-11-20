@@ -110,7 +110,7 @@ printDebug x = when (isDebug x) . debugOut
       Right o    -> appendFile o . (++"\n")
 
 dumpCode x top proj = case outPath x of
-  Nothing -> putDoc $ generateCode proj
+  Nothing -> putDoc $ generateCode (layout x) proj
   Just d  -> do
     -- create dump path
     let dumpPath = d </> name x
@@ -125,7 +125,7 @@ dumpCode x top proj = case outPath x of
         copyFile depPath trgPath
     -- now generate and dump the code
     withFile (dumpPath </> unpack top <.> "c") WriteMode $
-             \h -> renderIO h $ layoutPretty (layout x) $ generateCode proj
+             \h -> renderIO h $ layoutPretty (layout x) $ generateCode (layout x) proj
 
 data Flag
   -- control

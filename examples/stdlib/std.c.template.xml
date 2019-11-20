@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <library name="standard" contains="type" target="c">
     <template name="comb">
 	{{ placeholder("func") }}
@@ -7,17 +8,17 @@
 {{ placeholder("od_func") }}
     </template>
     <template name="+">
-	{{ret.ifName}} =  {{arg1.ifName}} + {{arg2.ifName}};
+	{{ret.name}} = {{arg1.name}} + {{arg2.name}};
     </template>
     <template name="id">
-	{{ret.ifName}} = {{arg.ifName}};
+	{{ret.name}} = {{arg.name}};
     </template>
     <template name="stdinRead">
 	<requirement include="stdio.h"/>
-scanf("{{form.macroVal}}", &amp;{{inp.ifName}});
+	scanf("{{form}}", &amp;{{inp.name}});
     </template>
     <template name="stdoutWrite">
 	<requirement include="stdio.h"/>
-printf("{{form.macroVal}}", {{out.ifName}});
+	printf("{{form}}", {{out.name}});
     </template>
 </library>

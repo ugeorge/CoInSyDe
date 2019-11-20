@@ -72,7 +72,7 @@ updateProj db cp proj =
     newReqmnts  = nub $ requmnts proj ++ reqs cp ++
                   L.concatMap tyRequ (L.filter isForeign currTypes)
     -- only states are allowed to be declared as global variables
-    newGlobVars = M.union (globVars proj) (M.filter isState $ ifs cp)
+    newGlobVars = M.union (globVars proj) (M.filter isGlobal $ ifs cp)
     -- only non-foreign types need to be declared
     newTypes    = nub $ allTypes proj ++ L.filter canDeclare currTypes
     -- transfer component as-is

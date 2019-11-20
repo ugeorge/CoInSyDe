@@ -29,7 +29,7 @@ module CoInSyDe.Core (
   ) where
 
 import Data.Typeable
-import Data.Text as T (Text,unpack,strip)
+import Data.Text as T (Text,unpack)
 import Control.DeepSeq
 
 import CoInSyDe.Frontend
@@ -63,7 +63,7 @@ class ( Typeable l
   -- | Constructor for requirement type
   mkRequ :: FNode f => f -> Requ l
   -- | Constructor for a text/macro
-  mkMacro :: Text -> If l
+  mkMacro:: Text -> If l
 
 -- | Container for functional components or glue operators
 data Comp l where
@@ -99,7 +99,7 @@ data Instance l where
          } -> Instance l
 deriving instance Target l => Show (Instance l)
 deriving instance Target l => Read (Instance l)
-instance  Target l => NFData (Instance l) where
+instance Target l => NFData (Instance l) where
   rnf (Ref n i b) = rnf n `seq` rnf i `seq` rnf b
 
 ------------- EXPORTED DICTIONARY BUILDERS -------------

@@ -2,7 +2,7 @@ native:
   name: bool2int
   interface:
   - {name: arg, class: iarg, type: Bool}
-  - {name: ret, class: oarg, type: Int}
+  - {name: ret, class: ret, type: Int}
   requirement: {include: "./bool2int.c"}
 pattern:
 - name: preMoore
