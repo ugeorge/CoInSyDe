@@ -133,6 +133,8 @@ mkArray tyLib pNodes = ArrTy baseTy size
 -- | Makes a 'Foreign' type from a node
 --
 -- > type[@name=*,@class="foreign",@targetName=*]
+-- > ? parameter[@name="callPrefix", @value=*]
+-- > ? parameter[@name="bindPrefix", @value=*]
 -- > + requirement[@include=*]
 mkForeign tName pNodes = Foreign tName cPrefix bPrefix $ map mkRequ pNodes
   where cPrefix = getParam' "callPrefix" pNodes
