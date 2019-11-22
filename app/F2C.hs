@@ -124,7 +124,7 @@ dumpCode x top proj = case outPath x of
         createDirectoryIfMissing True (takeDirectory trgPath)
         copyFile depPath trgPath
     -- now generate and dump the code
-    withFile (dumpPath </> unpack top <.> "c") WriteMode $
+    withFile (dumpPath </> (drop 4 $ unpack top) <.> "c") WriteMode $
              \h -> renderIO h $ layoutPretty (layout x) $ generateCode (layout x) proj
 
 data Flag

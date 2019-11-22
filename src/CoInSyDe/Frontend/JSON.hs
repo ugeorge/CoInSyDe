@@ -14,25 +14,26 @@
 ----------------------------------------------------------------------
 module CoInSyDe.Frontend.JSON where
 
-import CoInSyDe.Frontend
+import           CoInSyDe.Frontend
 
-import Control.Exception (throw)
-import Data.Yaml
-import Data.Aeson
-import Data.Text as T (pack,unpack,strip,lines,unlines,null)
-import Data.Text.Lazy as TL (unpack)
-import Data.Vector as V (toList)
-import Data.HashMap.Strict as H (lookup)
-import Text.Pretty.Simple (pShow)
-import qualified Data.ByteString.Lazy as BL
+import           Control.Exception (throw)
+import           Data.Aeson
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BL
+import           Data.HashMap.Strict as H (lookup)
+import           Data.Text as T (pack,unpack,strip,lines,unlines,null)
+import           Data.Text.Encoding (decodeUtf8)
+import           Data.Text.Lazy as TL (unpack)
+import           Data.Vector as V (toList)
+import           Data.Yaml
+import           Data.Yaml.Pretty
 
 
 type JSON = Object
 
 -- | JSON parser API
 instance FNode JSON where
-  getInfo _      = "JSON"  -- Aeson does not have error reporting!
+  getInfo _      = ""  -- Aeson does not have error reporting!
   children str n =
     case H.lookup (pack str) n of
       Just (Object o) -> [o]
@@ -47,11 +48,11 @@ instance FNode JSON where
     case H.lookup (pack str) n of
       Just (String a) -> Right a
       _               -> Left $ "cannot find attribute " ++ show str ++
-                         " in node\n " ++ (TL.unpack $ pShow n)
-  getBoolAttr str n =
+                         " in node\n " ++ T.unpack (decodeUtf8 $ encodePretty defConfig n)
+  getJsonAttr str n =
     case H.lookup (pack str) n of
-      Just (Bool a) -> Right a
-      _             -> Left $ "cannot find boolean " ++ show str 
+      Just a -> Right a
+      _      -> Left $ "cannot find boolean " ++ show str 
 
 getObjects = map (\(Object c) -> c) . filter isObject
   where

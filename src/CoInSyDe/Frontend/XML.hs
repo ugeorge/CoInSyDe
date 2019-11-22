@@ -13,14 +13,15 @@
 ----------------------------------------------------------------------
 module CoInSyDe.Frontend.XML where
 
-import CoInSyDe.Frontend
+import           CoInSyDe.Frontend
 
-import Control.Exception (throw)
-import Text.XML.Light
-import Data.Text as T (pack,unpack,strip,lines,unlines,null)
-import Data.Text.Lazy as TL (unpack)
-import Text.Pretty.Simple (pShow)
+import           Control.Exception (throw)
+import           Data.Aeson as JSON
 import qualified Data.ByteString.Lazy as BL
+import           Data.Text as T (pack,unpack,strip,lines,unlines,null)
+import           Data.Text.Lazy as TL (unpack)
+import           Text.Pretty.Simple (pShow)
+import           Text.XML.Light
 
 type XML = Element
 
@@ -34,9 +35,9 @@ instance FNode Element where
       Just a  -> Right $ pack a
       Nothing -> Left $ "cannot find attribute " ++ show attr ++
                  " in node\n " ++ (TL.unpack $ pShow n)
-  getBoolAttr attr n =
+  getJsonAttr attr n =
     case findAttr (qn attr) n of
-      Just a  -> Right $ a == "true" || a == "TRUE" || a == "yes" || a == "YES"
+      Just a  -> Right $ JSON.toJSON a
       Nothing -> Left $ "cannot find attribute " ++ show attr ++
                  " in node\n " ++ (TL.unpack $ pShow n)
                  

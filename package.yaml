@@ -35,6 +35,7 @@ dependencies:
 - filepath
 - bytestring >= 0.10
 - directory >= 1.2
+- scientific
 # - binary
 - deepseq
 - aeson

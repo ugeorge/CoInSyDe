@@ -14,7 +14,7 @@
 -- their constructors.
 ----------------------------------------------------------------------
 module CoInSyDe.Backend.C.Core (
-  C(..), Type(..), If(..), Requ(..), Value(..), Kind(..),
+  C(..), Type(..), If(..), Requ(..), CVal(..), Kind(..),
   -- * 'Type' constructors
   mkPrimTy, mkEnumTy, mkStruct, mkArray, mkForeign,
   -- * 'If' (interface) constructors
@@ -32,7 +32,7 @@ import Control.DeepSeq (NFData)
 import Data.Text (Text,append,snoc)
 import Data.Text.Read
 
-import Data.Aeson hiding (Array,Value)
+import qualified Data.Aeson as JSON
 
 -- | Defines the family of C target languages. In particular it defines a set of types
 -- (see 'Type C'), a set of interfaces (see 'If C') and a set of requirements (see
@@ -40,9 +40,9 @@ import Data.Aeson hiding (Array,Value)
 data C = C
 
 -- | Captures the different kinds of syntax used for initializing variables. 
-data Value = NoVal      -- ^ no initialization
-           | Val Text   -- ^ initialization value in textual format
-           | Cons Name  -- ^ points to constructor referenced in the parent
+data CVal = NoVal      -- ^ no initialization
+          | Val Text   -- ^ initialization value in textual format
+          | Cons Name  -- ^ points to constructor referenced in the parent
                         -- component's 'InstMap'
            deriving (Show, Read, Generic, NFData)
 
@@ -54,7 +54,7 @@ instance Target C where
   data Type C = PrimTy  {tyName :: Id} 
               | EnumTy  {tyName :: Id, enumVals  :: [(Text, Maybe Text)]}
               | Struct  {tyName :: Id, sEntries  :: Map Text (Type C)}
-              | Array   {arrBaseTy :: Type C, arrSize :: Int}
+              | ArrTy   {arrBaseTy :: Type C, arrSize :: Int}
               | Foreign {tyName :: Id, oCallPrefix :: Text, oBindPrefix :: Text,
                          tyRequ :: [Requ C]}
               | NoTy    {tyName :: Id} -- ^ will always be void
@@ -71,8 +71,8 @@ instance Target C where
           parameters   = node |= "parameter"
           requirements = node |= "requirement"
           
-  data If C = Macro    {ifName :: Id, macroVal :: Text}
-            | Variable {ifName :: Id, ifKind :: Kind, ifTy :: Type C, ifVal :: Value}
+  data If C = Macro    {ifName :: Id, macroVal :: JSON.Value}
+            | Variable {ifName :: Id, ifKind :: Kind, ifTy :: Type C, ifVal :: CVal}
             deriving (Read, Show, Generic, NFData)
   mkIf pId typeLib node =
     case node @! "class" of
@@ -83,18 +83,18 @@ instance Target C where
       "oport" -> mkGeneric Put typeLib node
       "var"   -> mkGeneric LocVar typeLib node
       "state" -> mkState typeLib pId node
-      "macro" -> mkParam node
+      "param" -> mkParam node
       x -> error $ "Glue of type " ++ show x ++ " is not recognized!"
-  mkMacro = Macro "__intern__"
+  mkMacro = Macro "__intern__" . JSON.String
 
   data Requ C = Include Text deriving (Read, Show, Eq, Generic, NFData)
   mkRequ node = Include (node @! "include")
 
 -----------------------------------------------------------------
 
-instance ToJSON Value     where toEncoding = genericToEncoding defaultOptions
-instance ToJSON (Requ C)  where toEncoding = genericToEncoding defaultOptions
-instance ToJSON (Type C)  where toEncoding = genericToEncoding defaultOptions
+instance JSON.ToJSON CVal      where toEncoding = JSON.genericToEncoding JSON.defaultOptions
+instance JSON.ToJSON (Requ C)  where toEncoding = JSON.genericToEncoding JSON.defaultOptions
+instance JSON.ToJSON (Type C)  where toEncoding = JSON.genericToEncoding JSON.defaultOptions
 
 -----------------------------------------------------------------
 
@@ -121,12 +121,12 @@ mkEnumTy tName pNodes = EnumTy tName (map extract pNodes)
 mkStruct tyLib tName pNodes = Struct tName (mkMap $ map extract pNodes)
   where extract n = (n @! "name", tyLib !* (n @! "type"))
 
--- | Makes an 'Array' from a node
+-- | Makes an 'ArrTy' from a node
 --
 -- > type[@name=*,@class="array"]
 -- > - parameter[@name="baseType",@value=*]
 -- > - parameter[@name="size",@value=*]
-mkArray tyLib pNodes = Array baseTy size
+mkArray tyLib pNodes = ArrTy baseTy size
   where baseTy  = tyLib !* getParam "baseType" pNodes
         size    = fst $ either error id $ decimal $ getParam "size" pNodes
 
@@ -178,10 +178,10 @@ mkState tyLib parentId node = Variable name GlobVar ty val
 
 -- | Makes a 'Macro' from a node
 --
--- > intern[@class="macro",@name=*,@value=*]
+-- > intern[@class="param",@name=*,@value=*]
 mkParam node = Macro name val
   where name = node @! "name"
-        val  = node @! "value"
+        val  = node @: "value"
 
 
 isPrimitive PrimTy{}  = True
@@ -190,7 +190,7 @@ isForeign Foreign{}   = True
 isForeign _           = False
 isVoid NoTy{}         = True
 isVoid _              = False
-isArray Array{}       = True
+isArray ArrTy{}       = True
 isArray _             = False
 
 isMacro Macro{} = True

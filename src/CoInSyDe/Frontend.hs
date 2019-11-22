@@ -17,6 +17,7 @@ import Data.Text (Text,pack)
 import Data.ByteString.Lazy (ByteString)
 import Control.Exception
 import Data.Typeable (Typeable)
+import qualified Data.Aeson as JSON
 
 -- | Exceptions for more meaningful frontend-related error messages.
 data FrontendException
@@ -38,7 +39,7 @@ class Show f => FNode f where
   -- | Returns either the value of a certain attribute or a specific error message.
   getStrAttr :: String -> f -> Either String Text
   -- | Gets the text content from a node.
-  getBoolAttr :: String -> f -> Either String Bool
+  getJsonAttr :: String -> f -> Either String JSON.Value
   -- | Gets the text content from a node.
   getTxt :: f -> Text
   -- | Gets info about element as string
@@ -63,9 +64,15 @@ node @! attr = case getStrAttr attr node of
 
 -- | Same as 'getBoolAttr' but with the default set to 'False'.
 (@^) :: FNode f => f -> String -> Bool
-node @^ attr = case getBoolAttr attr node of
-                 Right val -> val
-                 Left  _   -> False
+node @^ attr = case getJsonAttr attr node of
+                 Right (JSON.Bool b) -> b
+                 _                   -> False
+
+-- | Same as 'getBoolAttr' but with the default set to 'False'.
+(@:) :: FNode f => f -> String -> JSON.Value
+node @: attr = case getJsonAttr attr node of
+                 Right v  -> v
+                 Left msg -> throw (ParseException (getInfo node) msg)
 
 -- | Same as 'children', but looks for several node names instead of just one.
 childrenOf :: FNode f => [String] -> f -> [f]

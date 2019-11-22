@@ -15,7 +15,7 @@ module CoInSyDe.Core.Dict (
   -- * CoInSyDe 'Map' Type
   Id, Map, mkMap, ids, entries, idEntries, (!?!),
   -- * History-Bookkeeping Map
-  MapH, Info(..), Policy(..),
+  MapH, Info(..), Policy(..), prettyInfo,
   emptyDict, mkDict, mkInfoNode, (!*), (!^),
   dictUpdate, dictTransfer
   ) where
@@ -43,11 +43,10 @@ type Map k t = M.HashMap k t
 type MapH t = Map Id (t,[Info])
 
 -- | Stores information about the current entry (e.g. component).
-data Info = Info {ldFile :: FilePath, ldInfo :: String} deriving (Read)
+data Info = Info {ldFile :: FilePath, ldInfo :: String} deriving (Read,Show)
 
-instance Show Info where
-  show (Info f "") = f
-  show (Info f i)  = f ++ " (" ++ i ++ ")"
+prettyInfo (Info f "") = f
+prettyInfo (Info f i)  = f ++ " (" ++ i ++ ")"
 
 instance NFData Info where
   rnf _ = ()

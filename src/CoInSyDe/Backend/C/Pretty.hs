@@ -17,7 +17,7 @@ import           CoInSyDe.Core.Dict
 import           CoInSyDe.Backend.Gen
 import           CoInSyDe.Backend.C.Core
 
-import           Data.Aeson hiding (Array,Value)
+import           Data.Aeson as JSON
 import qualified Data.HashMap.Strict as H
 import           Data.List (sort,sortOn)
 import           Data.Text (Text,pack, unpack,append)
@@ -83,7 +83,7 @@ pTyDecl (EnumTy nm vals) = return $
   where initVar (a, Nothing) = pretty a
         initVar (a, Just v)  = pretty a <> equals <> pretty v
 
--- pTyDecl (Arraym base size) = 
+-- pTyDecl (ArrTym base size) = 
 --   pretty (tyName base) <+> pretty nm <> brackets (pretty size)
 
 pTyDecl (Struct nm types) = return $
@@ -114,7 +114,7 @@ pTyDecl t = throwError $
 pVDecl :: If C -> CGen
 pVDecl Macro{} = error "Macro should not be declared!"
 pVDecl i = case ifTy i of
-  (Array b s) -> return $ pretty (tyName b) <+>
+  (ArrTy b s) -> return $ pretty (tyName b) <+>
                  pretty (ifName i) <> brackets (pretty s)
   _           -> return $ pretty (tyName $ ifTy i) <+> pretty (ifName i)
 
@@ -132,21 +132,23 @@ pVDeclInit i = case ifVal i of
 
 pVIBind :: If C -> CGen
 pVIBind i
-  | isMacro i  = return $ pretty $ macroVal i
+  | isMacro i  = case macroVal i of
+                   JSON.String a -> return $ pretty a
+                   _ -> throwError $ "Macro expanded in code is not string\n" ++ show i
   | isGlobal i = return $ "&" <> pretty (ifName i)
   | otherwise  = return $ pretty (ifName i)
 
 pVOBind :: If C -> CGen
 pVOBind i@Macro{} = throwError $ "Cannot bind output arg with macro\n " ++ show i
 pVOBind i = case ifTy i of
-  (Array b s)       -> return $ pretty (ifName i)
+  (ArrTy b s)       -> return $ pretty (ifName i)
   (Foreign n c b _) -> return $ pretty b <> pretty (ifName i)
   _                 -> return $ "&" <> pretty (ifName i)
 
 pVIFDef :: If C -> CGen
 pVIFDef i@Macro{} = throwError $ "Macro in type signature!\n " ++ show i
 pVIFDef i = case ifTy i of
-  (Array b s)       -> return $ pretty (tyName b) <+> "*" <> pretty (ifName i)
+  (ArrTy b s)       -> return $ pretty (tyName b) <+> "*" <> pretty (ifName i)
   (Foreign n c b _) -> return $ pretty n <+> pretty c <> pretty (ifName i)
   _                 -> return $ pretty (tyName $ ifTy i) <+> pretty (ifName i)
 
@@ -179,6 +181,7 @@ pFunDecl f = do
   dOArgs <- mapM pVOFDef (oarg sif)
   return $ pretty retTy <+> pretty (cpName f) <+> sepArg (dOArgs ++ dIArgs) <> semi
 
+-- this function can be moved to a target template macro
 pFunCall :: IfMap C -> Comp C -> CGen
 pFunCall binds f = do
   sif    <- categorize $ ifs f
@@ -187,10 +190,15 @@ pFunCall binds f = do
   let r = ret sif
       assignStr 
         | isVoid (ifTy r) = pretty (cpName f)
-        | otherwise = pretty (ifName $ binds !?! ifName r)
+        | otherwise = pretty (getNameBRet r)
                       <+> equals <+> pretty (cpName f)
   return $ assignStr <+> sepArg (bOArgs ++ bIArgs) <> semi
-
+  where
+    -- TODO: more elegant solution
+    getNameBRet r = case binds !?! ifName r of
+                    i@(Variable _ OutArg _ _) -> pVOUse i
+                    i -> ifName i
+                       
 pMainDef :: IfMap C -> Comp C -> CGen
 pMainDef states top = do
   sif    <- categorize $ ifs top
@@ -248,18 +256,19 @@ pFunCode cIfs cRefs tpl = do
 
 ----------------------------------------------------------------------
 
-makeJsonMap refs cIfs = H.insert "instance" (toJSON $ sort refs) (H.map toJSON cIfs) 
+makeJsonMap refs cIfs = -- H.insert "instance" (toJSON $ sort refs)
+  (H.map toJSON cIfs) 
 
 -- HACK!!!
 
 pVOUse Macro{} = error "should not be used as such"
 pVOUse i = case ifTy i of
-  (Array b s)       -> ifName i
+  (ArrTy b s)       -> ifName i
   (Foreign n c b _) -> c   `append` ifName i
   _                 -> "*" `append` ifName i
 
 instance ToJSON (If C)  where
-  toJSON (Macro name val) = object [name .= val]
+  toJSON (Macro name val) = val
   toJSON i@(Variable _ OutArg t v) =
     object ["name" .= pVOUse i, "type" .= toJSON t, "value" .= toJSON v]
   toJSON (Variable n _ t v) =
