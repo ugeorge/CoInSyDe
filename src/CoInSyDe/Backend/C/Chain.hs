@@ -29,19 +29,19 @@ generateCode opts (Proj welcome top funDecls requmnts globVars allTypes allFuncs
   (vsep . punctuate hardline)
   [ pretty welcome
   , "// Included libraries" <> line
-    <> vsep (mapGen "requirements" pInclude requmnts)
+    <> vsep (mapGen "declaring requirements" pInclude requmnts)
   , "// Custom types" <> line
-    <> vsep (mapGen "type declaratons" pTyDecl allTypes)
+    <> vsep (mapGen "defining custom types" pTyDecl allTypes)
   , "// State variables" <> line
-    <> vsep (mapGen "global variable decl" (semiM pVDecl) $ entries globVars)
+    <> vsep (mapGen "declaring global variables" (semiM pVDecl) $ entries globVars)
   , "// Function declarations" <> line
-    <> vsep (mapGenCp pFunDecl funDecls)
+    <> vsep (mapGenCp "declaring function" pFunDecl funDecls)
   , "// Function definitions" <> line
-    <> vsep (mapGenCp pFunDef funDecls)
+    <> vsep (mapGenCp "defining function" pFunDef funDecls)
   , "// Main function" <> line
-    <> genDoc state top (pMainDef globVars $ allFuncs !* top)
+    <> genDocComp state "defining main function" top (pMainDef globVars $ allFuncs !* top)
   ] <> hardline
   where
-    state = GenS { stage = "", cpDb = allFuncs, layout = opts }
-    mapGen s f = map (genDoc state s . f)
-    mapGenCp f = map (\x -> genDoc state x $ f (cpDb state !* x))
+    state = initGenState allFuncs opts defaultGenDebugOpts
+    mapGen   s f = map (genDocStage state s . f)
+    mapGenCp s f = map (\x -> genDocComp state s x $ f (allFuncs !* x))

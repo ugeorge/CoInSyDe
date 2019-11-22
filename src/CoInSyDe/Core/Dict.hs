@@ -43,7 +43,12 @@ type Map k t = M.HashMap k t
 type MapH t = Map Id (t,[Info])
 
 -- | Stores information about the current entry (e.g. component).
-data Info = Info {ldFile :: FilePath, ldInfo :: String} deriving (Show,Read)
+data Info = Info {ldFile :: FilePath, ldInfo :: String} deriving (Read)
+
+instance Show Info where
+  show (Info f "") = f
+  show (Info f i)  = f ++ " (" ++ i ++ ")"
+
 instance NFData Info where
   rnf _ = ()
 

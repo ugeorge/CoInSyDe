@@ -76,7 +76,7 @@ pInclude (Include file) = return $
 
 -- OBS: no PrimTy allowed
 pTyDecl :: Type C -> CGen
-pTyDecl (NoTy _) = throwCritical "You cannot declare void type!"
+pTyDecl (NoTy _) =  error "You cannot declare void type!"
 
 pTyDecl (EnumTy nm vals) = return $
   "typedef enum" <+> (sepDef comma . map initVar) vals <+> pretty nm <> semi
@@ -112,7 +112,7 @@ pTyDecl t = throwError $
 
 -- internal helpers
 pVDecl :: If C -> CGen
-pVDecl Macro{} = throwCritical "Macro should not be declared!"
+pVDecl Macro{} = error "Macro should not be declared!"
 pVDecl i = case ifTy i of
   (Array b s) -> return $ pretty (tyName b) <+>
                  pretty (ifName i) <> brackets (pretty s)
@@ -158,7 +158,8 @@ pVOFDef i = case ifTy i of
 
 pVFun :: Id -> CGen
 pVFun n = do
-  (cp,db) <- getCpAndDb
+  db <- getDb
+  cp <- getCp
   let inst   = refs cp !?! n
       rCp    = db !* refId inst
       rBinds = bindings inst
@@ -228,12 +229,12 @@ pFunDef f = do
 pFunCode :: IfMap C -> InstMap C -> String -> CGen
 pFunCode cIfs cRefs tpl = do
   db     <- getDb
-  layout <- getLayout
+  layout <- getLayoutOpts
   s      <- getState
   let varMap  = makeJsonMap (ids cRefs) cIfs
       genText = renderStrict . removeTrailingWhitespace . layoutPretty layout . genFun
       genFun n
-        | rInline   = genDoc s (cpName rComp) $
+        | rInline   = genDocComp' s (cpName rComp) $
                       pFunCode rBdIfs rBdRefs (template rComp)
         | otherwise = genDoc' s $ pFunCall rBdIfs rComp
         where (Ref rId rInline rBdIfs) = cRefs !?! n
@@ -242,7 +243,7 @@ pFunCode cIfs cRefs tpl = do
               replace rRefs rBIfs =
                 let replaceIf intf = rBIfs !?! ifName intf
                 in  fmap (\(Ref n i b) -> Ref n i (fmap replaceIf b)) rRefs
-  code <- generateCode (mkContext genText varMap) tpl
+  code <- fromTemplate (mkContext genText varMap) tpl
   return $ pretty code
 
 ----------------------------------------------------------------------

@@ -1,122 +1,200 @@
 {-# LANGUAGE FlexibleContexts, OverloadedStrings #-}
-module CoInSyDe.Backend.Gen where
+module CoInSyDe.Backend.Gen (
+  Gen, genDocStage, genDocComp, genDocComp', genDoc',
+  GenState(..), initGenState, GenDebugOpts, defaultGenDebugOpts,
+  getCp, getDb, getLayoutOpts, getState, pushCallStack, throwError,
+  TplContext, mkContext, fromTemplate,
+  GeneratorException
+  ) where
 
 import           Control.Exception
-import           Control.Monad.Writer.Lazy as W
+import           Control.Monad.State.Lazy
+import           Control.Monad.Writer.Lazy
 import qualified Data.Aeson as JSON
 import           Data.Default (def)
 import qualified Data.HashMap.Strict as H
-import           Data.Maybe (fromMaybe)
-import           Data.Text hiding (map, filter, head, concatMap)
+import qualified Data.List as L
+import           Data.Maybe
+import           Data.Text (Text)
+import qualified Data.Text as T
+import           Data.Text.Encoding (decodeUtf8)
+import           Data.Typeable (Typeable)
 import           Data.Yaml.Pretty
 import           Text.Ginger
 import           Text.Ginger.Run.Type (GingerContext (..))
-import           Data.ByteString.Char8 as B (unpack)
 
-import CoInSyDe.Core
-import CoInSyDe.Core.Dict
+import           CoInSyDe.Core
+import           CoInSyDe.Core.Dict
 
-import Control.Monad.State.Lazy
--- import Control.Monad.Except
-import Data.Typeable (Typeable)
+type Gen o l = State (GenState o l)
 
-data GeneratorException
-  = CriticalGen Text String
-  | ErrorGen Text [Info] String
-  deriving (Typeable)
-instance Exception GeneratorException
+data GenState opt l
+  = GenS { stage      :: String
+         , callStack  :: [Id]
+         , database   :: MapH (Comp l)
+         , layoutOpts :: opt
+         , debugOpts  :: GenDebugOpts
+         } deriving (Show)
 
-instance Show GeneratorException where
-  show (CriticalGen stage msg) =
-    "Critical error generating code for " ++ show stage ++ ":\n " ++ msg
-  show (ErrorGen stage [] msg) =
-    "Error generating code for " ++ show stage ++ ":\n " ++ msg
-  show (ErrorGen cp hist msg) =
-    "Error generating code for component " ++ show cp
-    ++ " with load history :\n->" ++ concatMap ((++"\n   ") . show) hist
-    ++ "What's wrong: " ++ msg
+initGenState = GenS "" []
 
--- TODO: use Either as exception monad
-type Gen o l a = State (GenS o l) a
+genDocStage st stg f      = evalState f (st {stage = stg})
+genDocComp  st stg cpId f = evalState f (st {stage = stg, callStack = [cpId]})
 
-data GenS opt l = GenS { stage  :: Text
-                       , cpDb   :: MapH (Comp l)
-                       , layout :: opt
-                       } deriving (Show)
-
-genDoc s stg f = evalState f (s {stage = stg})
-
+genDocComp' st cpId f = evalState f (st {callStack = cpId : callStack st})
 genDoc' = flip evalState
 
-
-getState :: Target l => Gen o l (GenS o l)
-getState = get
-
 getCp :: Target l => Gen o l (Comp l)
-getCp = get >>= \s -> return (cpDb s !* stage s)
+getCp = get >>= \s -> return $ database s !* (head $ callStack s)
 
 getDb :: Target l => Gen o l (MapH (Comp l))
-getDb = get >>= \s -> return (cpDb s)
+getDb = get >>= \s -> return $ database s
 
-getCpAndDb :: Target l => Gen o l (Comp l, MapH (Comp l))
-getCpAndDb = get >>= \s -> return (cpDb s !* stage s, cpDb s)
+getState :: Target l => Gen o l (GenState o l)
+getState = get
 
-getLayout :: Target l => Gen o l o
-getLayout = get >>= \s -> return (layout s)
+getLayoutOpts :: Target l => Gen o l o
+getLayoutOpts = get >>= \s -> return (layoutOpts s)
 
-changeStage :: Target l => Id -> Gen o l ()
-changeStage x = get >>= \s -> put (s {stage = x})
+pushCallStack :: Target l => Id -> Gen o l ()
+pushCallStack x = modify $ \s -> (s {callStack = x : callStack s})
 
-
-throwCritical :: String -> Gen o l a
-throwCritical msg = do
-  s <- get
-  throw $ CriticalGen (stage s) msg
-
-throwError :: String -> Gen o l a
+-- only one used outside
+throwError :: Target l => String -> Gen o l a
 throwError msg = do
   s <- get
-  throw $ ErrorGen (stage s) [] msg
+  let (_,stack,hist) = throwHelper s
+  throw $ GeneratorError (stage s) stack hist msg
 
-throwErrorH :: Target l => String -> Gen o l a
-throwErrorH msg = do
+throwTemplateParse msg = do
   s <- get
-  let cpId = stage s
-      hist = cpDb s !^ cpId
-  throw $ ErrorGen cpId hist msg
+  let (cpId',_,hist) = throwHelper s
+      cpId = fromMaybe (error "Critical: no call stack!") cpId'
+  throw $ TemplateParseError cpId hist msg
+
+throwTemplateRun msg = do
+  s <- get
+  let (_,stack,hist) = throwHelper s
+  throw $ TemplateRunError stack hist msg
+
+throwHelper :: Target l => GenState o l -> (Maybe Id, [Id], [Info])
+throwHelper s = (cpId,stack,hist)
+  where 
+    opts  = debugOpts s
+    cpId  = listToMaybe $ callStack s
+    stack = if showCallStack opts then callStack s else []
+    h'    = if showLoadFile opts then (!^) (database s) <$> cpId else Nothing
+    hist  = if showLoadHist opts then fromMaybe [] h' else maybeToList (head <$> h')
+
+data GenDebugOpts =
+  GenDebugOpts { showLoadHist  :: Bool
+               , showLoadFile  :: Bool
+               , showCallStack :: Bool
+               } deriving Show
+
+defaultGenDebugOpts =
+  GenDebugOpts { showLoadHist  = False
+               , showLoadFile  = True
+               , showCallStack = True }
+    
+------------------------------------------------------------------
+
+newtype WriterMonad = WM { runWriterMonad :: Either String Text }
+
+instance Semigroup WriterMonad where
+  (WM (Right x)) <> (WM (Right y)) = WM (Right (mappend x y))
+  (WM (Left x))  <> _ = WM (Left x)
+  _  <> (WM (Left x)) = WM (Left x)
+  
+instance Monoid WriterMonad where
+  mempty = WM (Right T.empty)
 
 ------------------------------------------------------------------
 
-type TplRunner  = Run SourcePos (Writer Text) Text
-type TplContext = GingerContext SourcePos (Writer Text) Text
+type TplMonad   = Writer WriterMonad
+type TplRunner  = Run SourcePos TplMonad Text
+type TplContext = GingerContext SourcePos TplMonad Text
 
-mkFunction :: (Text -> Text)
-           -> Function TplRunner
+tellTplM  = tell . WM
+newTplM x = writer (T.empty, WM $ Right x)
+execTplM  = runWriterMonad . execWriter
+
+mkFunction :: (Text -> Text) -> Function TplRunner
 mkFunction f xs = do
-  liftRun2 (\x->writer (empty,x)) . f . asText . snd . head $ xs -- only first arg
+  liftRun2 newTplM . f . asText . snd . head $ xs -- only first arg
   return def  
 
 mkContext :: (Text -> Text) 
           -> H.HashMap VarName JSON.Value
           -> TplContext
-mkContext f d = makeContextText
-                (\k -> fromMaybe (err k) $ H.lookup k contextDict)
+mkContext f d = makeContextTextExM look write except
   where
-    contextDict = H.insert "placeholder"
-                  (fromFunction $ mkFunction f)
-                  (H.map toGVal d) :: H.HashMap VarName (GVal TplRunner)
-    err k = error $ "Template error: Key " ++ show k
-            ++ " not found in dictionary:\n"
-            ++ (B.unpack $ encodePretty defConfig d)
+    look :: VarName
+           -> Run SourcePos TplMonad Text (GVal (Run SourcePos TplMonad Text))
+    look k = return $ toGVal $ H.lookup k contextDict
 
-generateCode :: Target l => TplContext
+    write :: Text -> TplMonad ()
+    write = tellTplM . Right
+
+    except :: RuntimeError SourcePos -> TplMonad ()
+    except e@(RuntimeErrorAt p (IndexError i)) = tellTplM $ Left $
+      T.unpack (runtimeErrorWhat e) ++ " at " ++
+      L.concatMap (show . flip setSourceName "") (runtimeErrorWhere e) ++
+      "\nCannot find key " ++ show i ++ " in dictionary\n" ++
+      T.unpack (decodeUtf8 $ encodePretty defConfig d)
+    except e = tellTplM $ Left $
+      T.unpack (runtimeErrorWhat e) ++ " at " ++
+      L.concatMap (show . flip setSourceName "") (runtimeErrorWhere e) ++
+      "\n" ++ T.unpack (runtimeErrorMessage e)
+      
+    contextDict ::  H.HashMap VarName (GVal TplRunner)
+    contextDict = H.insert "placeholder"
+                  (fromFunction $ mkFunction f) (H.map toGVal d)
+
+fromTemplate :: Target l
+             => TplContext
              -> Source -- -> (Writer Text) Text
              -> Gen o l Text
-generateCode context tpl = do
-  let options' = mkParserOptions (\_ -> return Nothing)
-      options = options' { poKeepTrailingNewline = False
-                         , poLStripBlocks = False
-                         , poTrimBlocks = False}
-  template <- either (throwErrorH . show) return =<< parseGinger' options tpl
-  return $ runGinger context (optimize template) 
+fromTemplate context tpl = do
+  let options  = mkParserOptions (\_ -> return Nothing)
+      errParse = throwTemplateParse . formatParserError (Just tpl) 
+  template <- either errParse return =<< parseGinger' options tpl
+  let status = execTplM $ runGingerT context (optimize template) 
+  case status of
+    Left err   -> throwTemplateRun err
+    Right code -> return code
 
+------------------------------------------------------------------
+
+data GeneratorException 
+  = GeneratorError String [Id] [Info] String
+  | TemplateParseError Id [Info] String
+  | TemplateRunError [Id] [Info] String
+  deriving (Typeable)
+instance Exception GeneratorException
+
+instance Show GeneratorException where
+  show (GeneratorError stage stack history msg) =
+    "Code generator error" ++ showErrHelper stage stack history msg 
+  show (TemplateParseError id history msg) =
+    "Template parse error" ++ showErrHelper "" [id] history msg 
+  show (TemplateRunError stack history msg) =
+    "Template generation error" ++ showErrHelper "" stack history msg 
+
+showErrHelper :: String -> [Text] -> [Info] -> String -> String
+showErrHelper stg s h msg =
+  showStage stg ++ showCp s ++ showFrom h ++ showMsg ++ showStack s ++ showHistory h
+  where
+    showStage ""  = ""
+    showStage stg = " when " ++ stg
+    showCp []  = ""
+    showCp (x:_) = " for component " ++ show x
+    showMsg  = ":\n" ++ msg
+    showStack [] = ""
+    showStack x  = "\n\nCall stack: " ++ (L.intercalate " <- " $ map T.unpack x)
+    showFrom []    = ""
+    showFrom (x:_) = " loaded from: " ++ show x
+    showHistory (_:y:ys) = "\nOverloading components with the same name from:\n"
+                           ++ concatMap (((++) "\n * ") . show) (y:ys)
+    showHistory _ = ""
+                         
