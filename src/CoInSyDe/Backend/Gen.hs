@@ -23,7 +23,7 @@ import           Data.Typeable (Typeable)
 import           Data.Yaml.Pretty
 import           Text.Ginger
 import           Text.Ginger.GVal
-import           Text.Ginger.Run.Type (GingerContext (..))
+import           Text.Ginger.Run.Type (GingerContext (..),throwHere)
 
 import           CoInSyDe.Core
 import           CoInSyDe.Core.Dict
@@ -174,10 +174,14 @@ fromTemplate context tpl = do
 
 rangeF :: Monad m => Function (Run p m h)
 rangeF [] = return def
-rangeF ((_,x):_) = return . toGVal . (\u -> [0..u-1]) . toNumber $ x
-  where
-    toNumber :: GVal m -> Int
-    toNumber = fromMaybe (error "NaI!") . toBoundedInteger . fromMaybe (error "NaN!") . asNumber
+rangeF ((_,x):_) = do
+  xNum <- maybe (throwHere $ ArgumentsError (Just "range")
+                  $ T.pack $ show x ++ " is not a number!")
+          return $ asNumber x
+  xInt <- maybe (throwHere $ ArgumentsError (Just "range")
+                  $ T.pack $ show x ++ " is not an integer!")
+          return $ toBoundedInteger xNum
+  return $ toGVal $ ([0..xInt-1] :: [Int])
 
 ------------------------------------------------------------------
 

@@ -206,10 +206,10 @@ pMainDef states top = do
   initSt <- mapM (semiM pVInit) (entries states)
   inVars <- mapM (semiM pVDeclInit) (var sif ++ iport sif ++ oport sif)
   code   <- pFunCode (ifs top) (refs top) (template top)
-  return $ header <+> cBraces (initSt ++ inVars ++ loop [code])
+  return $ header <+> cBraces (initSt ++ inVars ++ [code])
   where
     header = "int main(int argc, char ** argv)"
-    loop x = ["while (1)" <+> cBraces x]
+    -- loop x = ["while (1)" <+> cBraces x]
     sanity _ NvComp{} = throwError "A native C function cannot be top module!"
     sanity sif _ = case iarg sif ++ oarg sif of
       [] -> return ()
