@@ -74,3 +74,5 @@ where `<var_class>` may be:
 
 * `iarg`, `oarg` for input/output function arguments. Outputs are defined as pointer arguments.
 * `ret` is _the_ return variable for a function (allowed only one)
+* `state` is a global variable
+* `iport`, `oport`, `var`. Internal variables. There is currently no usage difference between the three, just that `iport` and `oport` should be associated with some read/write mechanism binding. 
