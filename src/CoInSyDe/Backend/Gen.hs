@@ -172,14 +172,6 @@ fromTemplate context tpl = do
 ------------------------------------------------------------------    
 -- U kidding me?! Ginger has no 'range' function. I need to define it
 
--- rangeFuncion :: Function TplRunner
--- rangeFuncion args = do
---   liftRun2 newTplM . makeRange . map (toNumber . snd) . take 2 $ args
---   return def
---   where
---     toNumber = fromMaybe (error "NaI!") . toBoundedInteger . fromMaybe (error "NaN!") . asNumber
---     makeRange [x,y] = [x..y]
-
 rangeF :: Monad m => Function (Run p m h)
 rangeF [] = return def
 rangeF ((_,x):_) = return . toGVal . (\u -> [0..u-1]) . toNumber $ x
