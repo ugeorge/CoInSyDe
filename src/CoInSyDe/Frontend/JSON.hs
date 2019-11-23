@@ -23,7 +23,6 @@ import qualified Data.ByteString.Lazy as BL
 import           Data.HashMap.Strict as H (lookup)
 import           Data.Text as T (pack,unpack,strip,lines,unlines,null)
 import           Data.Text.Encoding (decodeUtf8)
-import           Data.Text.Lazy as TL (unpack)
 import           Data.Vector as V (toList)
 import           Data.Yaml
 import           Data.Yaml.Pretty
@@ -42,7 +41,7 @@ instance FNode JSON where
       Nothing         -> []
   getTxt n =
     case H.lookup "code" n of
-      Just (String a) ->  T.unlines . filter (not . T.null) . map T.strip . T.lines $ a
+      Just (String a) ->  T.unlines . filter (not . T.null . T.strip) . T.lines $ a
       _               -> ""
   getStrAttr str n =
     case H.lookup (pack str) n of

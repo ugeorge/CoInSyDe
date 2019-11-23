@@ -19,11 +19,10 @@ import           CoInSyDe.Backend.C.Core
 
 import           Data.Aeson as JSON
 import qualified Data.HashMap.Strict as H
-import           Data.List (sort,sortOn)
-import           Data.Text (Text,pack, unpack,append)
+import           Data.List (sortOn)
+import           Data.Text as T (Text,pack, unpack,append,words)
 import           Data.Text.Prettyprint.Doc
 import           Data.Text.Prettyprint.Doc.Render.Text
-
 
 type CGen = Gen LayoutOptions C (Doc ())
 
@@ -42,17 +41,16 @@ semiM      = ((<$>) (<>semi) .)
 -- interfaces.
 data SeparatedIfs = Sep {
   iarg  :: [If C], oarg  :: [If C], ret ::  If C,  ret'  :: [If C],
-  iport :: [If C], oport :: [If C], var :: [If C], state :: [If C], macro :: [If C]
+  port :: [If C], var :: [If C], state :: [If C], macro :: [If C]
   } deriving (Show)
 categorize is = do
   ret <- getOutput ret'
-  return $ Sep iarg oarg ret ret' iport oport var state macro
+  return $ Sep iarg oarg ret ret' port var state macro
   where
     (macro,vars) = (filter isMacro $ entries is, filter (not . isMacro) $ entries is)
     iarg  = sortOn ifName $ filter ((==InArg) . ifKind) vars
     oarg  = sortOn ifName $ filter ((==OutArg) . ifKind) vars
-    iport = filter ((==Get) . ifKind) vars
-    oport = filter ((==Put) . ifKind) vars
+    port  = filter ((==Port) . ifKind) vars
     var   = filter ((==LocVar) . ifKind) vars
     state = filter ((==GlobVar) . ifKind) vars
     ret'  = filter ((==RetArg) . ifKind) vars
@@ -121,7 +119,7 @@ pVDecl i = case ifTy i of
 pVInit :: If C -> CGen
 pVInit i = case ifVal i of
   NoVal    -> return emptyDoc
-  (Val  v) -> return $ pretty (ifName i) <+> equals <+> pretty v 
+  (Val  v) -> return $ pretty (ifName i) <+> equals <+> pretty v <> semi 
   (Cons v) -> pVFun v >>= \f -> return (pretty (ifName i) <+> equals <+> f)
 
 pVDeclInit :: If C -> CGen
@@ -157,6 +155,14 @@ pVOFDef i@Macro{} = throwError $ "Macro in type signature!\n " ++ show i
 pVOFDef i = case ifTy i of
   (Foreign n c b _) -> return $ pretty n <+> pretty c <> pretty (ifName i)
   _                 -> return $ pretty (tyName $ ifTy i) <+> "*" <> pretty (ifName i)
+
+-- HACK!!!
+pVOUse Macro{} = error "should not be used as such"
+pVOUse i = case ifTy i of
+  (ArrTy b s)       -> ifName i
+  (Foreign n c b _) -> c   `append` ifName i
+  _                 -> "*" `append` ifName i
+
 
 pVFun :: Id -> CGen
 pVFun n = do
@@ -203,8 +209,8 @@ pMainDef :: IfMap C -> Comp C -> CGen
 pMainDef states top = do
   sif    <- categorize $ ifs top
   sanity sif top
-  initSt <- mapM (semiM pVInit) (entries states)
-  inVars <- mapM (semiM pVDeclInit) (var sif ++ iport sif ++ oport sif)
+  initSt <- mapM pVInit $ filter ((/=NoVal) . ifVal) (entries states)
+  inVars <- mapM (semiM pVDeclInit) (var sif ++ port sif)
   code   <- pFunCode (ifs top) (refs top) (template top)
   return $ header <+> cBraces (initSt ++ inVars ++ [code])
   where
@@ -220,7 +226,7 @@ pFunDef f = do
   sif    <- categorize $ ifs f
   iArgs  <- mapM pVIFDef (iarg sif)
   oArgs  <- mapM pVOFDef (oarg sif)
-  inVars <- mapM (semiM pVDeclInit) (var sif ++ iport sif ++ oport sif)
+  inVars <- mapM (semiM pVDeclInit) (var sif ++ port sif)
   let retStr = map (\a -> "return" <+> pretty (ifName a) <>semi) (ret' sif)
       retTy  = tyName $ ifTy $ ret sif
       header = pretty retTy <+> pretty (cpName f) <+> sepArg (oArgs ++ iArgs)
@@ -259,16 +265,8 @@ pFunCode cIfs cRefs tpl = do
 makeJsonMap refs cIfs = -- H.insert "instance" (toJSON $ sort refs)
   (H.map toJSON cIfs) 
 
--- HACK!!!
-
-pVOUse Macro{} = error "should not be used as such"
-pVOUse i = case ifTy i of
-  (ArrTy b s)       -> ifName i
-  (Foreign n c b _) -> c   `append` ifName i
-  _                 -> "*" `append` ifName i
-
 instance ToJSON (If C)  where
-  toJSON (Macro name val) = val
+  toJSON (Macro _ val) = val
   toJSON i@(Variable _ OutArg t v) =
     object ["name" .= pVOUse i, "type" .= toJSON t, "value" .= toJSON v]
   toJSON (Variable n _ t v) =

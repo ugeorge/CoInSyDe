@@ -19,7 +19,7 @@ In the notations below we use the following convention
 * `x|y` means either `x` or `y`
 
 
-## Common Elements
+### Common Nodes
 
 	root
 	* pattern(...)
@@ -55,7 +55,7 @@ An instance is a binding of a `placeholder` inside the template to another compo
 
 The binding `withValue` is the equivalent of creating and binding a parameter-like interface in the callee called `__internal__`. 
 
-### C-Specific Format
+### C-Specific Nodes
 
 __OBS:__ top modules are components called `top_<name>`, and the name will be given to the generated C file.
 
@@ -75,4 +75,13 @@ where `<var_class>` may be:
 * `iarg`, `oarg` for input/output function arguments. Outputs are defined as pointer arguments.
 * `ret` is _the_ return variable for a function (allowed only one)
 * `state` is a global variable
-* `iport`, `oport`, `var`. Internal variables. There is currently no usage difference between the three, just that `iport` and `oport` should be associated with some read/write mechanism binding. 
+* `var` is an internal (declared) variable.
+* `port` is treated exactly the same as `var` by CoInSyDe. It is mainly used for "user convenience" to denote a variable involved with a sync/communication mechanism.
+
+### Template code
+
+Inside the `CTEXT` for `template`s we unse [Ginger](https://ginger.tobiasdammers.nl/guide/) syntax. CoInSyDe implements the following template functions _on top of_ the ones [provided by Ginger](https://ginger.tobiasdammers.nl/guide/syntax/filters/):
+
+* `range(x)` creates an iteratable list of numbers `[0..x]`
+* `interface('name')` returns the interface entry (dictionary) for `name`, where `name` is usually obtained from a function.
+* `placeholder('comp_id')` calls the CoInSyDe recursive methods for either calling or expanding an inner component.
