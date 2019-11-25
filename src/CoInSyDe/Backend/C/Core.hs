@@ -54,7 +54,7 @@ instance Target C where
   data Type C = PrimTy  {tyName :: Id} 
               | EnumTy  {tyName :: Id, enumVals  :: [(Text, Maybe Text)]}
               | Struct  {tyName :: Id, sEntries  :: Map Text (Type C)}
-              | ArrTy   {arrBaseTy :: Type C, arrSize :: Int}
+              | ArrTy   {tyName :: Id, arrBaseTy :: Type C, arrSize :: Int}
               | Foreign {tyName :: Id, oCallPrefix :: Text, oBindPrefix :: Text,
                          tyRequ :: [Requ C]}
               | NoTy    {tyName :: Id} -- ^ will always be void
@@ -125,7 +125,7 @@ mkStruct tyLib tName pNodes = Struct tName (mkMap $ map extract pNodes)
 -- > type[@name=*,@class="array"]
 -- > - parameter[@name="baseType",@value=*]
 -- > - parameter[@name="size",@value=*]
-mkArray tyLib pNodes = ArrTy baseTy size
+mkArray tyLib pNodes = ArrTy (tyName baseTy) baseTy size
   where baseTy  = tyLib !* getParam "baseType" pNodes
         size    = fst $ either error id $ decimal $ getParam "size" pNodes
 

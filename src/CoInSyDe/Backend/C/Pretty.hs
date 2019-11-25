@@ -112,7 +112,7 @@ pTyDecl t = throwError $
 pVDecl :: If C -> CGen
 pVDecl Macro{} = error "Macro should not be declared!"
 pVDecl i = case ifTy i of
-  (ArrTy b s) -> return $ pretty (tyName b) <+>
+  (ArrTy n b s) -> return $ pretty (tyName b) <+>
                  pretty (ifName i) <> brackets (pretty s)
   _           -> return $ pretty (tyName $ ifTy i) <+> pretty (ifName i)
 
@@ -133,20 +133,22 @@ pVIBind i
   | isMacro i  = case macroVal i of
                    JSON.String a -> return $ pretty a
                    _ -> throwError $ "Macro expanded in code is not string\n" ++ show i
-  | isGlobal i = return $ "&" <> pretty (ifName i)
+  | isGlobal i = case ifTy i of
+                   ArrTy{} -> return $ pretty (ifName i)
+                   _ -> return $ "&" <> pretty (ifName i)
   | otherwise  = return $ pretty (ifName i)
 
 pVOBind :: If C -> CGen
 pVOBind i@Macro{} = throwError $ "Cannot bind output arg with macro\n " ++ show i
 pVOBind i = case ifTy i of
-  (ArrTy b s)       -> return $ pretty (ifName i)
+  (ArrTy n b s)     -> return $ pretty (ifName i)
   (Foreign n c b _) -> return $ pretty b <> pretty (ifName i)
   _                 -> return $ "&" <> pretty (ifName i)
 
 pVIFDef :: If C -> CGen
 pVIFDef i@Macro{} = throwError $ "Macro in type signature!\n " ++ show i
 pVIFDef i = case ifTy i of
-  (ArrTy b s)       -> return $ pretty (tyName b) <+> "*" <> pretty (ifName i)
+  (ArrTy n b s)     -> return $ pretty (tyName b) <+> "*" <> pretty (ifName i)
   (Foreign n c b _) -> return $ pretty n <+> pretty c <> pretty (ifName i)
   _                 -> return $ pretty (tyName $ ifTy i) <+> pretty (ifName i)
 
@@ -159,7 +161,7 @@ pVOFDef i = case ifTy i of
 -- HACK!!!
 pVOUse Macro{} = error "should not be used as such"
 pVOUse i = case ifTy i of
-  (ArrTy b s)       -> ifName i
+  (ArrTy n b s)     -> ifName i
   (Foreign n c b _) -> c   `append` ifName i
   _                 -> "*" `append` ifName i
 

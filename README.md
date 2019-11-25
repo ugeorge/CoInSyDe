@@ -51,7 +51,7 @@ Native is a component which contains native target code instead of a template. I
 An instance is a binding of a `placeholder` inside the template to another component.
 
 	instance{@!placeholder:<name>, @!component:<callee_id>}
-	* bind{@!replace:<callee_if_name>, @![with:<own_if_name>|withValue:<value>]}
+	* bind{@!replace:<callee_if_name>, @![with:<parent_if_name>|withValue:<value>]}
 
 The binding `withValue` is the equivalent of creating and binding a parameter-like interface in the callee called `__internal__`. 
 
