@@ -96,17 +96,18 @@ pTyDecl t = throwError $
 -- generators for variables and interfaces
 ---------------------------------------------
 
---         | Decl      | Init          | IBind | OBind | IFDef     | OFDef
--------------------------------------------------------------------------------
--- prim    | int a;    | a = 1;        | f(a   | f(&a  | f(int a   | f(int* a
--- enum    | e_t b;    | b = true;     |  ,b   |  ,&b  |  ,e_t b   |  ,e_t* b
--- struct  | s_t c;    | c.x=1; c.y=2; |  ,c   |  ,&c  |  ,s_t c   |  ,s_t* c
--- array   | int d[3]; | d = {1,2,3};  |  ,d   |  , d  |  ,int* d  |  ,int* d
--- foreign | fifo* e;  | e = mkFifo(3);|  ,e); |  , e);|  ,fifo* e)|  ,fifo* e);
+--         | Decl      | Init          | IBind | OBind | IFDef     | OFDef     | OUse
+-------------------------------------------------------------------------------|-------
+-- prim    | int a;    | a = 1;        | f(a   | f(&a  | f(int a   | f(int* a  | *a
+-- enum    | e_t b;    | b = true;     |  ,b   |  ,&b  |  ,e_t b   |  ,e_t* b  | *b
+-- struct  | s_t c;    | c = mkStruct; |  ,c   |  ,&c  |  ,s_t c   |  ,s_t* c  | *c
+-- array   | int d[3]; | d = {1,2,3};  |  ,d   |  , d  |  ,int* d  |  ,int* d  |  d
+-- foreign | fifo* e;  | e = mkFifo(3);|  ,e); |  , e);|  ,fifo* e)|  ,fifo* e)| ?e
 --
 -- OBS:- struct init happens in a template/code, as an instance, similar to foreign
---     - ocalls change the scoped name of the variable
---     - foreigns specify their bind/call prefix
+--     - TODO: structures can be initialized using JSON values
+--     - calls to output vars change the scoped name of the variable (see OUse)
+--     - foreigns _specify_ their bind/call prefix
 
 -- internal helpers
 pVDecl :: If C -> CGen
