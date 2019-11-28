@@ -1,0 +1,157 @@
+#+TITLE: Correct-by-Construction Design Flows for Cyber-Physical System
+#+AUTHOR: George Ungureanu
+#+BEAMER_HEADER: \title[CoInSyDe]{CoInSyDe -- A Component-Based Code Expander}
+#+OPTIONS:  H:2 toc:nil num:t tags:t \n:nil @:t ::t |:t ^:t -:t f:t *:t <:t
+#+OPTIONS:  TeX:t LaTeX:t skip:nil d:nil todo:t pri:nil tags:not-in-toc
+
+#+LANGUAGE:  en
+#+startup: beamer
+
+#+LATEX_CLASS: beamer
+#+LATEX_CLASS_OPTIONS: [presentation]
+#+BEAMER_THEME: Madrid
+#+COLUMNS: %45ITEM %10BEAMER_ENV(Env) %10BEAMER_ACT(Act) %4BEAMER_COL(Col) %8BEAMER_OPT(Opt)
+
+#+LATEX_HEADER: \usepackage{listings}
+#+LATEX_HEADER: \usepackage{tikz}
+#+LATEX_HEADER_EXTRA: \hypersetup{colorlinks, urlcolor=blue, linkcolor=cyan}
+
+# #+BEAMER_HEADER: \AtBeginSection[]{\begin{frame}\tableofcontents[currentsection]\end{frame}}
+
+#+EXPORT_SELECT_TAGS: export
+#+EXPORT_EXCLUDE_TAGS: noexport
+
+* Introduction
+** Let's All Become Web Developers!
+
+*** A Jekyll template + dictionary                            :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.55
+    :BEAMER_env: block
+    :END:
+
+\scriptsize This template:
+
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src html 
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>{{ title }}</title>
+  </head>
+  {# This is a comment... #}
+  <body>
+    <menu id="nav-main">
+    {% for item in navigation %}
+    <li><a href="{{ item.url }}">{{ item.label }}</a></li>
+    {% endfor %}
+    </menu>
+    <div class="layout-content-main">
+      <h1>{{ title }}</h1>
+      {{ body }}
+    </div>
+  </body>
+</html>
+#+end_src
+
+This JSON/YAML dictionary:
+
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src yaml 
+navigation: 
+- {label: Home, url: "/"}
+- {label: Example Site, url: "https://www.example.com/"}
+- {label: Meaning of Life, url: "https://forsyde.github.io"}
+title: "Hello, World!"
+#+end_src
+
+*** The HTML result                                           :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.43
+    :BEAMER_env: block
+    :END:
+
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src html 
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Hello, World!</title>
+  </head>
+    
+  <body>
+    <menu id="nav-main">
+      <li><a href="/">Home</a></li>
+      <li><a href="https://www.example.com/">
+             Example Site</a></li>
+      <li><a href="https://forsyde.github.io">
+             Meaning of Life</a></li>
+    </menu>
+    <div class="layout-content-main">
+      <h1>Hello, World!</h1>
+            
+    </div>
+  </body>
+</html>
+#+end_src
+
+** Et voilà
+
+[[./forsyde-www.png]]
+
+
+** Only HTML/Markup Languages?
+   :PROPERTIES:
+   :BEAMER_envargs: [t]
+   :BEAMER_opt: fragile
+   :END:
+
+*** A Component + Description                                 :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.5
+    :BEAMER_env: block
+    :END:
+This component
+#+BEGIN_src latex
+{\centering
+\begin{tikzpicture}
+\node[inner sep=15pt,draw,rounded corners] (f) {$f$};
+\node[anchor=north] at (f.south) {\scriptsize actor};
+\path[draw] (f.east) node[fill=black](c){} node[anchor=north west] {\tiny c} (c) edge[->]++(1,0);
+\path[draw] (f.150) node[fill=black](a){} node[anchor=north east] {\tiny a} (a) edge[<-]++(-1,0);  
+\path[draw] (f.210) node[fill=black](b){} node[anchor=south east] {\tiny b} (b) edge[<-]++(-1,0); 
+\end{tikzpicture}}
+#+END_src
+
+This information
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src yaml 
+instance:
+- placeholder: f
+  component: wörk
+  where: myfuncs.h
+interface: 
+- {name: a, class: iport, channel: ch_a, type: int}
+- {name: b, class: iport, channel: ch_b, type: int[4]}
+- {name: c, class: oport, channel: ch_c, type: int}
+#+end_src
+
+*** For this code...                                          :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.43
+    :BEAMER_env: block
+    :END:
+#+ATTR_LATEX: :options fontsize=\scriptsize
+#+begin_src c 
+#include "myfuncs.h"
+
+void woerk_actor(){
+    int a;
+    int[4] b; 
+    int c;
+    a = read(ch_a,1);
+    b = read(ch_b,4);
+    c = wörk(a,b);
+    write(ch_c, &c, 1);
+}
+#+end_src
