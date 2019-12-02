@@ -794,16 +794,29 @@ CoInSyDe
 
 
 #+LATEX: \resizebox{.9\paperwidth}{!}{
-         |           | Decl        | Init             | IArgBind | OArgBind | IArgFDef    | OArgFDef     | OUse |
+         |           | Decl        | Init             | IArgBind | OArgBind | IArgDef     | OArgDef      | OUse |
          |-----------+-------------+------------------+----------+----------+-------------+--------------+------|
          | =prim=    | =int a;=    | =a = 1;=         | =( a=    | =(&a=    | =(int a=    | =(int* a=    | =*a= |
          | =enum=    | =e_t b;=    | =b = true;=      | =, b=    | =,&b=    | =,e_t b=    | =,e_t* b=    | =*b= |
          | =struct=  | =s_t c;=    | =c.x=1; c.y=2;=  | =, c=    | =,&c=    | =,s_t c=    | =,s_t* c=    | =*c= |
          | =array=   | =int d[3];= | =d = {1,2,3};=   | =, d=    | =, d=    | =,int* d=   | =,int* d=    | =d=  |
-         | =foreign= | =fifo* e;=  | =e = mkFifo(3);= | =, e);=  | =,?e);=  | =,fifo* e)= | =,fifo* e);= | =?e= |
+         | =foreign= | =fifo* e;=  | =e = mkFifo(3);= | =, e);=  | =,?e);=  | =,fifo* e)= | =,fifo? e);= | =?e= |
 #+LATEX: }
 
 - "LUT" hard-coded in =CoInSyDe.Backend.C.Pretty=
-- struct initialization not yet supported (but easy to implement)
+- =struct= initialization not yet supported (but easy to implement)
 - OUse changes the scoped name of the variable
-- foreigns specify their bind/use prefix
+- foreigns specify their bind/def/use prefix
+- Question: Should pointers be in-built in CoInSyDe? (currently only as =foreign=)
+
+** Further questions
+
++ files as dictionaries or as target source with "commented" markup? (literate programming style)
++ Documentation generator? (Pandoc API)
++ Who takes care of function definition/call code? CoInSyDe or specialized templates?
+  - trade-off between generic and specialized
++ Does anyone even want to touch this thing?
+  + User API for custom chains (not that difficult, but... Haskell)
+  + Python/Java API wrappers?
+  + Any interest in developing another target? (VHDL, Arduino, ForSyDe-Haskell(!?), SiLago, ...)
++ Is anyone interested in building a focus group?
