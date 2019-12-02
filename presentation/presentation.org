@@ -278,9 +278,240 @@ usrlib2/.c.ucosii.mbox: [write_mbox, read_mbox]
 #+end_src
 
 ** Input Specification
-** Types
-** Components
++ XML, JSON or YAML files
+
+*** Components (Generic)                                      :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.4
+    :BEAMER_env: block
+    :END:
+    
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src yaml 
+native { !name: <id>, ?CTEXT }
++  interface    # target-specific 
++? requirement  # target-specific
+
+template { !name: <id>, !CTEXT }
++  interface    # target-specific
++? instance     # generic
++? requirement  # target-specific
+
+pattern {!name: <id>, !type: <template_id>}
++  interface    # target-specific
++? instance     # generic
++? requirement  # target specific
+#+end_src
+
+=pattern= \rightarrow =template=
+
+*** Types (target specific -- e.g. C)                         :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.55
+    :BEAMER_env: block
+    :END:
+
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src yaml 
+type {name: Int, class: primitive, targetName: int}
+
+type {name: Bool, class: enum, targetName: bool_t}
+- parameter: {name: false, value: 0}
+- parameter: {name: true, value: 1}
+
+type {name: Img64, class: struct, targetName: img_t}
+- parameter: {name: a, type: ArrayInt64}
+- parameter: {name: format, type: String}
+
+type {name: ArrayInt64, class: struct, targetName: int}
+- parameter: {name: size, value: 64}
+
+type {name: FIFO, class: foreign, targetName: fifo*}
+- parameter: {name: callPrefix, value: ''}
+- parameter: {name: bindPrefix, value: ''}
+- requirement: {include: "lib/fifo.h"}
+#+end_src
+
+*** Disclaimer
+
+The format and the names are /far from stable/. (help maybe?)
+
+** Interfaces
+
+#+BEGIN_src latex
+\centering
+\begin{tikzpicture}
+\node[inner sep=15pt,draw,rounded corners] (f) {$c=f(a,b,s^*,N)$};
+\node[anchor=north] at (f.south) {\scriptsize process};
+\path[draw] (f.east) node[fill=black](c){} node[anchor=north west] {\tiny c} (c) edge[->]++(1,0);
+\path[draw] (f.170) node[fill=black](a){} node[anchor=north east] {\tiny a} (a) edge[<-]++(-1,0);  
+\path[draw] (f.190) node[fill=black](b){} node[anchor=south east] {\tiny b} (b) edge[<-]++(-1,0); 
+\end{tikzpicture}
+#+END_src
+
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src text
+interface:
+- {name: N, class: param, value: 4}                             
+- {name: s, class: state, type: Int, value: 0}                    int s = 0;
+
+                                                                  /* ... */
+
+- {name: a, class: iarg, type: Int}                               int proc_f(int a, int b){
+- {name: b, class: iarg, type: Int}                                   int c;
+- {name: c, class: ret, type: Int}                                    c = f(a,b,s,4);
+                                                                      return c;
+                                                                  }
+----------------------------------------------------------------------------------------------------
+- {name: a, class: iarg, type: Int}                               void proc_f(int* c, int a, int b){
+- {name: b, class: iarg, type: Int}                                   c* = f(a,b,s,4); 
+- {name: c, class: oarg, type: Int}                               } 
+----------------------------------------------------------------------------------------------------
+- {name: a, class: port, type: Int}                               void proc_f(){
+- {name: b, class: port, type: Int}                                   int a; int b;
+- {name: c, class: port, type: Int}                                   int c;
+instance:                                                             a = read( /* ... */ );
+- {placeholder: read_a, component: read, ...}                         b = read( /* ... */ );
+- {placeholder: read_b, component: read, ...}                         c = f(a,b,s,4);
+- {placeholder: write_c, component: write, ...}                       write (c, /* ... */ );    
+                                                                  }
+#+end_src
+
 ** Instances and Bindings
+
+*** Description                                               :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.5
+    :END:
+
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src yaml 
+pattern:
+  name: p1
+  type: sy.comb
+  interface:
+  - {name: a, class: iarg, type: Int}
+  - {name: b, class: iarg, type: Int}
+  - {name: c, class: ret, type: Int} 
+  instance:
+    placeholder: f
+    component: mean
+    bind: 
+    - {replace: arg1, with: a}
+    - {replace: arg2, with: b}
+    - {replace: weight, withValue: '2'}
+    - {replace: retarg, with: c}
+template:
+  name: mean
+  interface:
+  - {name: arg1, class: iarg, type: Int}
+  - {name: arg2, class: iarg, type: Int}
+  - {name: retarg, class: ret, type: Int} 
+  - {name: weight, class: iarg, type: Int} 
+  code: |
+    {{ retarg.name }} = ({{ arg1.name }} 
+    + {{ arg2.name }}) / {{ weight.value }}; 
+#+end_src
+
+*** Code                                                      :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.5
+    :END:
+
+#+BEGIN_src latex
+\centering
+\begin{tikzpicture}
+\node[inner sep=15pt,draw,rounded corners] (f) {$f$};
+\node[draw=black,fill=red] at (f) {$f$};
+\node[anchor=north] at (f.south) {\scriptsize SY.comb};
+\path[draw] (f.east) node[fill=black](c){} node[anchor=north west] {\tiny c} (c) edge[->]++(1,0);
+\path[draw] (f.150) node[fill=black](a){} node[anchor=north east] {\tiny a} (a) edge[<-]++(-1,0);  
+\path[draw] (f.210) node[fill=black](b){} node[anchor=south east] {\tiny b} (b) edge[<-]++(-1,0);
+\draw[dashed,thin] (-3,-1.2) rectangle (3,1); 
+\node[anchor=north east] at (3,1) {\scriptsize sys};
+\end{tikzpicture}
+#+END_src
+
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src c 
+int mean(int arg1, int arg2, int weight) {
+  int retarg;
+  retarg = (arg1 + arg2) / weight;
+  return retarg;
+}
+
+int p1(int a, int b) {
+  int c;
+  c = mean (a, b, 2);
+  return c;
+}
+#+end_src
+
+** Instances and Bindings
+
+*** Description                                               :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.5
+    :END:
+
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src yaml 
+pattern:
+  name: p1
+  type: sy.comb
+  interface:
+  - {name: a, class: iarg, type: Int}
+  - {name: b, class: iarg, type: Int}
+  - {name: c, class: ret, type: Int} 
+  instance:
+    placeholder: f
+    component: mean
+    inline: true
+    bind: 
+    - {replace: arg1, with: a}
+    - {replace: arg2, with: b}
+    - {replace: weight, withValue: '2'}
+    - {replace: retarg, with: c}
+template:
+  name: mean
+  interface:
+  - {name: arg1, class: iarg, type: Int}
+  - {name: arg2, class: iarg, type: Int}
+  - {name: retarg, class: ret, type: Int} 
+  - {name: weight, class: iarg, type: Int} 
+  code: |
+    {{ retarg.name }} = ({{ arg1.name }} 
+    + {{ arg2.name }}) / {{ weight.value }}; 
+#+end_src
+
+*** Code                                                      :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.5
+    :END:
+
+#+BEGIN_src latex
+\centering
+\begin{tikzpicture}
+\node[inner sep=15pt,draw,rounded corners] (f) {$f$};
+\node[draw=black,fill=red] at (f) {$f$};
+\node[anchor=north] at (f.south) {\scriptsize SY.comb};
+\path[draw] (f.east) node[fill=black](c){} node[anchor=north west] {\tiny c} (c) edge[->]++(1,0);
+\path[draw] (f.150) node[fill=black](a){} node[anchor=north east] {\tiny a} (a) edge[<-]++(-1,0);  
+\path[draw] (f.210) node[fill=black](b){} node[anchor=south east] {\tiny b} (b) edge[<-]++(-1,0);
+\draw[dashed,thin] (-3,-1.2) rectangle (3,1); 
+\node[anchor=north east] at (3,1) {\scriptsize sys};
+\end{tikzpicture}
+#+END_src
+
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src c 
+int p1(int a, int b) {
+  int c;
+  c = (a + b) / 2;
+  return c;
+}
+#+end_src
+
 * Examples
 ** \mu{}C/OS-II Initialization Task
 
@@ -558,3 +789,21 @@ CoInSyDe
         CoInSyDe.Backend.Gen         -- (generic) generator monad +
                                      -- Ginger template wrappers 
 #+END_src
+** C Interface Definitions and Usage
+
+
+
+#+LATEX: \resizebox{.9\paperwidth}{!}{
+         |           | Decl        | Init             | IArgBind | OArgBind | IArgFDef    | OArgFDef     | OUse |
+         |-----------+-------------+------------------+----------+----------+-------------+--------------+------|
+         | =prim=    | =int a;=    | =a = 1;=         | =( a=    | =(&a=    | =(int a=    | =(int* a=    | =*a= |
+         | =enum=    | =e_t b;=    | =b = true;=      | =, b=    | =,&b=    | =,e_t b=    | =,e_t* b=    | =*b= |
+         | =struct=  | =s_t c;=    | =c.x=1; c.y=2;=  | =, c=    | =,&c=    | =,s_t c=    | =,s_t* c=    | =*c= |
+         | =array=   | =int d[3];= | =d = {1,2,3};=   | =, d=    | =, d=    | =,int* d=   | =,int* d=    | =d=  |
+         | =foreign= | =fifo* e;=  | =e = mkFifo(3);= | =, e);=  | =,?e);=  | =,fifo* e)= | =,fifo* e);= | =?e= |
+#+LATEX: }
+
+- "LUT" hard-coded in =CoInSyDe.Backend.C.Pretty=
+- struct initialization not yet supported (but easy to implement)
+- OUse changes the scoped name of the variable
+- foreigns specify their bind/use prefix
