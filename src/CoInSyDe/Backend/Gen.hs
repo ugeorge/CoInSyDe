@@ -7,6 +7,9 @@ module CoInSyDe.Backend.Gen (
   GeneratorException
   ) where
 
+import           CoInSyDe.Core
+import           CoInSyDe.Core.Dict
+
 import           Control.Exception
 import           Control.Monad.State.Lazy
 import           Control.Monad.Writer.Lazy
@@ -23,10 +26,8 @@ import           Data.Typeable (Typeable)
 import           Data.Yaml.Pretty
 import           Text.Ginger
 import           Text.Ginger.GVal
-import           Text.Ginger.Run.Type (GingerContext (..))
-
-import           CoInSyDe.Core
-import           CoInSyDe.Core.Dict
+import           Text.Ginger.Run.Type (GingerContext (..),throwHere)
+import           Text.Ginger.Run.VM
 
 type Gen o l = State (GenState o l)
 
@@ -154,6 +155,8 @@ mkContext f d = makeContextTextExM look write except
                   (fromFunction $ mkFunction f) $
                   H.insert "range"
                   (fromFunction rangeF) $
+                  H.insert "interface"
+                  (fromFunction returnIfF) $
                   (H.map toGVal d)
 
 fromTemplate :: Target l
@@ -173,11 +176,21 @@ fromTemplate context tpl = do
 -- U kidding me?! Ginger has no 'range' function. I need to define it
 
 rangeF :: Monad m => Function (Run p m h)
-rangeF [] = return def
-rangeF ((_,x):_) = return . toGVal . (\u -> [0..u-1]) . toNumber $ x
-  where
-    toNumber :: GVal m -> Int
-    toNumber = fromMaybe (error "NaI!") . toBoundedInteger . fromMaybe (error "NaN!") . asNumber
+rangeF [] = return def -- TODO: throw error
+rangeF ((_,x):_) = do
+  xNum <- maybe (throwHere $ ArgumentsError (Just "range")
+                  $ T.pack $ show x ++ " is not a number!")
+          return $ asNumber x
+  xInt <- maybe (throwHere $ ArgumentsError (Just "range")
+                  $ T.pack $ show x ++ " is not an integer!")
+          return $ toBoundedInteger xNum
+  return $ toGVal ([0..xInt-1] :: [Int])
+
+returnIfF :: Monad m => Function (Run p m h)
+returnIfF [] = return def -- TODO: throw error
+returnIfF ((_,x):_) = do
+  context <- getVar (asText x)
+  return $ toGVal context
 
 ------------------------------------------------------------------
 
