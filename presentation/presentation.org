@@ -789,6 +789,9 @@ CoInSyDe
         CoInSyDe.Backend.Gen         -- (generic) generator monad +
                                      -- Ginger template wrappers 
 #+END_src
+
++ CLOC = 1056 code + 224 blank + 438 comments
+
 ** C Interface Definitions and Usage
 
 
