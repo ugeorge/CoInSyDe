@@ -14,9 +14,10 @@
 
 #+LATEX_HEADER: \usepackage{listings}
 #+LATEX_HEADER: \usepackage{tikz}
+#+LATEX_HEADER: \usetikzlibrary{calc,shapes}
 #+LATEX_HEADER_EXTRA: \hypersetup{colorlinks, urlcolor=blue, linkcolor=cyan}
 
-# #+BEAMER_HEADER: \AtBeginSection[]{\begin{frame}\tableofcontents[currentsection]\end{frame}}
+#+BEAMER_HEADER: \AtBeginSection[]{\begin{frame}[noframenumbering]\tableofcontents[currentsection]\end{frame}}
 
 #+EXPORT_SELECT_TAGS: export
 #+EXPORT_EXCLUDE_TAGS: noexport
@@ -27,10 +28,9 @@
 *** A Jekyll template + dictionary                            :BMCOL:B_block:
     :PROPERTIES:
     :BEAMER_col: 0.55
-    :BEAMER_env: block
     :END:
 
-\scriptsize This template:
+**** \small This template:
 
 #+ATTR_LATEX: :options fontsize=\tiny
 #+begin_src html 
@@ -54,7 +54,7 @@
 </html>
 #+end_src
 
-This JSON/YAML dictionary:
+**** \small This JSON/YAML dictionary:
 
 #+ATTR_LATEX: :options fontsize=\tiny
 #+begin_src yaml 
@@ -99,7 +99,6 @@ title: "Hello, World!"
 
 [[./forsyde-www.png]]
 
-
 ** Only HTML/Markup Languages?
    :PROPERTIES:
    :BEAMER_envargs: [t]
@@ -109,21 +108,20 @@ title: "Hello, World!"
 *** A Component + Description                                 :BMCOL:B_block:
     :PROPERTIES:
     :BEAMER_col: 0.5
-    :BEAMER_env: block
     :END:
-This component
+**** This component
 #+BEGIN_src latex
-{\centering
+\centering
 \begin{tikzpicture}
 \node[inner sep=15pt,draw,rounded corners] (f) {$f$};
 \node[anchor=north] at (f.south) {\scriptsize actor};
 \path[draw] (f.east) node[fill=black](c){} node[anchor=north west] {\tiny c} (c) edge[->]++(1,0);
 \path[draw] (f.150) node[fill=black](a){} node[anchor=north east] {\tiny a} (a) edge[<-]++(-1,0);  
 \path[draw] (f.210) node[fill=black](b){} node[anchor=south east] {\tiny b} (b) edge[<-]++(-1,0); 
-\end{tikzpicture}}
+\end{tikzpicture}
 #+END_src
 
-This information
+**** This information
 #+ATTR_LATEX: :options fontsize=\tiny
 #+begin_src yaml 
 instance:
@@ -155,3 +153,670 @@ void woerk_actor(){
     write(ch_c, &c, 1);
 }
 #+end_src
+* CoInSyDe
+** Introducing CoInSyDe
+Why?
++ Target code is ugly!
++ You will never be able to capture the best syntax combination for all targets (NP-hard problem).
++ Let the experts do it, for their specific application/target.
++ You don't want to pollute your perfect tool with pretty printers.
++ The /experts/ will not touch your tool anyway!
+
+Purpose:
++ separate jobs
+  - code expert : writing target libraries (template code);
+  - system expert : generating meaningful specifications (dictionaries);
++ combine the two representations to synthesize target code.
+
+** Current Features
+
+*** Description
+Minimal(istic)^* /component-based/ framework for generating target code from a /solved/, /target-aware/ system specification, by combining /text/ templates.
+
+*** Overal Features
++ written in Haskell
++ hierarchical *nix-inspired library management, for building type and component databases.
++ uses (and minimally interferes with) the [[https://ginger.tobiasdammers.nl/guide/getting-started/][Ginger]] template engine.
++ recognizes input specs in [[https://www.w3schools.com/xml/][XML]], [[https://www.w3schools.com/js/js_json_xml.asp][JSON]] and [[http://sangsoonam.github.io/2017/03/13/yaml-vs-json.html][YAML]] formats.
++ common component core + target-tailored compilation chain 
+  - currently only C family of languages implemented
+
+** Compilation Chain
+   :PROPERTIES:
+   :BEAMER_envargs: [t]
+   :BEAMER_opt: fragile
+   :END:
+
+#+BEGIN_src latex
+\centering
+\newcommand{\filesh}[1]{%
+\begin{tikzpicture}[dline/.style={#1,ultra thick}]
+  \draw[dline,fill=#1!50]
+  (0,0) -- (0,1.2) -- (0.7,1.2) -- (1,0.8) -- (1,0) -- cycle;
+  \draw[dline] (0.7,1.2) -- (0.7,0.8) -- (1,0.8);
+  \foreach \y in {0.2,0.4,0.6}{
+     \draw[dline] (0.2,\y) -- (0.8,\y);
+     \draw[dline] (0.2,0.8) -- (0.6,0.8);
+     \draw[dline] (0.2,1) -- (0.6,1);
+  }
+\end{tikzpicture}  
+}
+\newcommand{\fileshs}[1]{%
+\begin{tikzpicture}
+  \node at (0,0) {\filesh{#1}};
+  \node[xshift=-3pt,yshift=-3pt] at (0,0) {\filesh{#1}};
+  \node[xshift=-6pt,yshift=-6pt] at (0,0) {\filesh{#1}};
+\end{tikzpicture}  
+}
+\begin{tikzpicture}[scale=.7,every node/.style={scale=.7},
+    repo/.style={draw,thick,cylinder,shape border rotate=90,aspect=.5}]
+\node(lib){%
+\begin{tikzpicture}[every node/.style={scale=.7,fill=white}]
+\draw[ultra thick] (o) node (lib) {\texttt{lib}} --++(-1,-1) node (c) {\texttt{.c}} --++(1,-1) node (ucos) {\texttt{.c.ucosii}};
+\draw (lib) --++(1,-1) node {\texttt{.vhdl}};
+\draw (c) --++(-1,-1) node {\texttt{.c.mpsoc}};
+\draw (ucos) --++(-1,-1) node {\texttt{.c.ucosii.q}};
+\draw (ucos) --++(1,-1) node {\texttt{.c.ucosii.sem}};
+\end{tikzpicture}};
+\node[anchor=north,fill=red!10] at (lib.south) {Load Libraries};
+\node[anchor=west,xshift=1cm,fill=gray!30] (db) at (lib.east){%
+\begin{tikzpicture}[repo/.style={draw,thick,cylinder,shape border rotate=90,aspect=.5}]
+\node[repo,minimum width=1.3cm,minimum height=1.5cm,fill=white](cp){Comp.};
+\node[repo,minimum width=1.3cm,minimum height=1.5cm,anchor=west,xshift=.3cm,fill=white] (ty) at (cp.east) {Types};
+\end{tikzpicture}};
+\path (lib) -- node[midway,sloped,scale=2] {$\Rightarrow$} (db);
+\node[anchor=north,yshift=-1.2cm,fill=red!10] (dblbl) at (db.south) {Build Database};
+\node[anchor=south,yshift=1.5cm,text width=1cm] (objdump) at (db.north) {objdump \fileshs{gray}};
+\path (db) -- node[midway,sloped,scale=2] {$\Leftrightarrow$} (objdump);
+\node[anchor=west,xshift=2cm,fill=gray!30] (proj) at (db.east){%
+\begin{tikzpicture}[repo/.style={draw,thick,cylinder,shape border rotate=90,aspect=.5}]
+\node[repo,minimum width=1.3cm,minimum height=1.5cm,fill=white](cp){Proj.};
+\end{tikzpicture}};
+\path (db) -- node[midway,sloped,scale=2] {$\Rightarrow$} (proj);
+\node[anchor=north,yshift=-1.2cm,fill=red!10] (projlbl) at (proj.south) {Build Project};
+\node[anchor=south,yshift=1.5cm,text width=1cm] (spec) at (proj.north) {spec \filesh{orange}};
+\path (proj) -- node[midway,sloped,scale=2] {$\Leftarrow$} (spec);
+\node[anchor=west,xshift=2cm] (code) at (proj.east){\fileshs{orange}};
+\path (proj) -- node[midway,sloped,scale=2] {$\Rightarrow$} (code);
+\node[anchor=south,yshift=1.5cm,text width=1.5cm,align=center] (native) at (code.north) {target lib \fileshs{gray}};
+\path (code) -- node[midway,sloped,scale=2] {$\Leftarrow$} (native);
+\node[anchor=north,yshift=-1.2cm,fill=red!10] at (code.south) {Pretty Print};
+\draw[dashed] ($(spec.north west)!.5!(objdump.north east)+(0,1)$) node (x) {} -- ($(projlbl.south west)!.5!(dblbl.south east)$);
+\node[anchor=north east,red] at (x.west) {\it generic};
+\node[anchor=north west,red] at (x.east) {\it target-specific};
+\end{tikzpicture}
+#+END_src
+
+* Specification
+** Library Management
+
++ Target: =.c.ucosii.q=
++ =COINSYDE_PATH=stdlib:usrlib1:usrlib2=
+
+*** Libraries
+#+ATTR_LATEX: :options fontsize=\scriptsize
+#+begin_src yaml 
+stdlib/.vhdl:           [sy_process, sy_moore]
+stdlib/.c:              [sy_process, sdf_process, main_func, printf, getchar]
+stdlib/.c.mpsoc:        [sy_process, sdf_process, printf, getchar]
+usrlib1/.c.mpsoc:       [sdf_process, write_fifo, read_fifo]
+stdlib/.c.ucosii:       [sy_process, sdf_process, main_func, init_func]
+usrlib1/.c.ucosii:      [sdf_process, main_func]
+usrlib2/.c.ucosii:      [main_func, init_func]
+usrlib1/.c.ucosii.q:    [write_fifo, read_fifo]
+usrlib2/.c.ucosii.mbox: [write_mbox, read_mbox]
+#+end_src
+
+*** Loaded Database
+
+#+ATTR_LATEX: :options fontsize=\scriptsize
+#+begin_src yaml 
+{write_fifo:  'usrlib1/.c.ucosii.q', read_fifo:  'usrlib1/.c.ucosii.q', 
+ main_func:   'usrlib2/.c.ucosii',   init_func:  'usrlib2/.c.ucosii', 
+ sdf_process: 'usrlib1/.c.ucosii',   sy_process: 'stdlib/.c.ucosii',
+ printf: 'stdlib/.c', getchar: 'stdlib/.c'}
+#+end_src
+
+** Input Specification
++ XML, JSON or YAML files
+
+*** Components (Generic)                                      :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.4
+    :BEAMER_env: block
+    :END:
+    
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src yaml 
+native { !name: <id>, ?CTEXT }
++  interface    # target-specific 
++? requirement  # target-specific
+
+template { !name: <id>, !CTEXT }
++  interface    # target-specific
++? instance     # generic
++? requirement  # target-specific
+
+pattern {!name: <id>, !type: <template_id>}
++  interface    # target-specific
++? instance     # generic
++? requirement  # target specific
+#+end_src
+
+=pattern= \rightarrow =template=
+
+*** Types (target specific -- e.g. C)                         :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.55
+    :BEAMER_env: block
+    :END:
+
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src yaml 
+type {name: Int, class: primitive, targetName: int}
+
+type {name: Bool, class: enum, targetName: bool_t}
+- parameter: {name: false, value: 0}
+- parameter: {name: true, value: 1}
+
+type {name: Img64, class: struct, targetName: img_t}
+- parameter: {name: a, type: ArrayInt64}
+- parameter: {name: format, type: String}
+
+type {name: ArrayInt64, class: struct, targetName: int}
+- parameter: {name: size, value: 64}
+
+type {name: FIFO, class: foreign, targetName: fifo*}
+- parameter: {name: callPrefix, value: ''}
+- parameter: {name: bindPrefix, value: ''}
+- requirement: {include: "lib/fifo.h"}
+#+end_src
+
+*** Disclaimer
+
+The format and the names are /far from stable/. (help maybe?)
+
+** Interfaces
+
+#+BEGIN_src latex
+\centering
+\begin{tikzpicture}
+\node[inner sep=15pt,draw,rounded corners] (f) {$c=f(a,b,s^*,N)$};
+\node[anchor=north] at (f.south) {\scriptsize process};
+\path[draw] (f.east) node[fill=black](c){} node[anchor=north west] {\tiny c} (c) edge[->]++(1,0);
+\path[draw] (f.170) node[fill=black](a){} node[anchor=north east] {\tiny a} (a) edge[<-]++(-1,0);  
+\path[draw] (f.190) node[fill=black](b){} node[anchor=south east] {\tiny b} (b) edge[<-]++(-1,0); 
+\end{tikzpicture}
+#+END_src
+
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src text
+interface:
+- {name: N, class: param, value: 4}                             
+- {name: s, class: state, type: Int, value: 0}                    int s = 0;
+
+                                                                  /* ... */
+
+- {name: a, class: iarg, type: Int}                               int proc_f(int a, int b){
+- {name: b, class: iarg, type: Int}                                   int c;
+- {name: c, class: ret, type: Int}                                    c = f(a,b,s,4);
+                                                                      return c;
+                                                                  }
+----------------------------------------------------------------------------------------------------
+- {name: a, class: iarg, type: Int}                               void proc_f(int* c, int a, int b){
+- {name: b, class: iarg, type: Int}                                   c* = f(a,b,s,4); 
+- {name: c, class: oarg, type: Int}                               } 
+----------------------------------------------------------------------------------------------------
+- {name: a, class: port, type: Int}                               void proc_f(){
+- {name: b, class: port, type: Int}                                   int a; int b;
+- {name: c, class: port, type: Int}                                   int c;
+instance:                                                             a = read( /* ... */ );
+- {placeholder: read_a, component: read, ...}                         b = read( /* ... */ );
+- {placeholder: read_b, component: read, ...}                         c = f(a,b,s,4);
+- {placeholder: write_c, component: write, ...}                       write (c, /* ... */ );    
+                                                                  }
+#+end_src
+
+** Instances and Bindings
+
+*** Description                                               :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.5
+    :END:
+
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src yaml 
+pattern:
+  name: p1
+  type: sy.comb
+  interface:
+  - {name: a, class: iarg, type: Int}
+  - {name: b, class: iarg, type: Int}
+  - {name: c, class: ret, type: Int} 
+  instance:
+    placeholder: f
+    component: mean
+    bind: 
+    - {replace: arg1, with: a}
+    - {replace: arg2, with: b}
+    - {replace: weight, withValue: '2'}
+    - {replace: retarg, with: c}
+template:
+  name: mean
+  interface:
+  - {name: arg1, class: iarg, type: Int}
+  - {name: arg2, class: iarg, type: Int}
+  - {name: retarg, class: ret, type: Int} 
+  - {name: weight, class: iarg, type: Int} 
+  code: |
+    {{ retarg.name }} = ({{ arg1.name }} 
+    + {{ arg2.name }}) / {{ weight.value }}; 
+#+end_src
+
+*** Code                                                      :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.5
+    :END:
+
+#+BEGIN_src latex
+\centering
+\begin{tikzpicture}
+\node[inner sep=15pt,draw,rounded corners] (f) {$f$};
+\node[draw=black,fill=red] at (f) {$f$};
+\node[anchor=north] at (f.south) {\scriptsize SY.comb};
+\path[draw] (f.east) node[fill=black](c){} node[anchor=north west] {\tiny c} (c) edge[->]++(1,0);
+\path[draw] (f.150) node[fill=black](a){} node[anchor=north east] {\tiny a} (a) edge[<-]++(-1,0);  
+\path[draw] (f.210) node[fill=black](b){} node[anchor=south east] {\tiny b} (b) edge[<-]++(-1,0);
+\draw[dashed,thin] (-3,-1.2) rectangle (3,1); 
+\node[anchor=north east] at (3,1) {\scriptsize sys};
+\end{tikzpicture}
+#+END_src
+
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src c 
+int mean(int arg1, int arg2, int weight) {
+  int retarg;
+  retarg = (arg1 + arg2) / weight;
+  return retarg;
+}
+
+int p1(int a, int b) {
+  int c;
+  c = mean (a, b, 2);
+  return c;
+}
+#+end_src
+
+** Instances and Bindings
+
+*** Description                                               :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.5
+    :END:
+
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src yaml 
+pattern:
+  name: p1
+  type: sy.comb
+  interface:
+  - {name: a, class: iarg, type: Int}
+  - {name: b, class: iarg, type: Int}
+  - {name: c, class: ret, type: Int} 
+  instance:
+    placeholder: f
+    component: mean
+    inline: true
+    bind: 
+    - {replace: arg1, with: a}
+    - {replace: arg2, with: b}
+    - {replace: weight, withValue: '2'}
+    - {replace: retarg, with: c}
+template:
+  name: mean
+  interface:
+  - {name: arg1, class: iarg, type: Int}
+  - {name: arg2, class: iarg, type: Int}
+  - {name: retarg, class: ret, type: Int} 
+  - {name: weight, class: iarg, type: Int} 
+  code: |
+    {{ retarg.name }} = ({{ arg1.name }} 
+    + {{ arg2.name }}) / {{ weight.value }}; 
+#+end_src
+
+*** Code                                                      :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.5
+    :END:
+
+#+BEGIN_src latex
+\centering
+\begin{tikzpicture}
+\node[inner sep=15pt,draw,rounded corners] (f) {$f$};
+\node[draw=black,fill=red] at (f) {$f$};
+\node[anchor=north] at (f.south) {\scriptsize SY.comb};
+\path[draw] (f.east) node[fill=black](c){} node[anchor=north west] {\tiny c} (c) edge[->]++(1,0);
+\path[draw] (f.150) node[fill=black](a){} node[anchor=north east] {\tiny a} (a) edge[<-]++(-1,0);  
+\path[draw] (f.210) node[fill=black](b){} node[anchor=south east] {\tiny b} (b) edge[<-]++(-1,0);
+\draw[dashed,thin] (-3,-1.2) rectangle (3,1); 
+\node[anchor=north east] at (3,1) {\scriptsize sys};
+\end{tikzpicture}
+#+END_src
+
+#+ATTR_LATEX: :options fontsize=\tiny
+#+begin_src c 
+int p1(int a, int b) {
+  int c;
+  c = (a + b) / 2;
+  return c;
+}
+#+end_src
+
+* Examples
+** \mu{}C/OS-II Initialization Task
+
+*** Spec                                                      :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.55
+    :END:
+#+ATTR_LATEX: :options fontsize=\tiny
+#+BEGIN_src yaml 
+pattern:
+- name: init
+  type: ucosii_init_task
+  interface:
+  - {name: pdata, class: iarg, type: VoidPointer}
+  # stacks
+  - {name: sourceStk, class: state, type: StackArray512}
+  - {name: p1Stk,     class: state, type: StackArray512}
+  - {name: sinkStk,   class: state, type: StackArray512}
+  # template parameters.
+  - {name: tasks, class: param, value:
+      [{name: source, prio: 15, stack: sourceStk},
+       {name: p1,     prio: 13, stack: p1Stk},
+       {name: sink,   prio: 11, stack: sinkStk}]}
+  instance:
+  - placeholder: dummy # no function call, but triggers  
+    component: source  # CoInSyDe to generate the definition
+  - placeholder: dummy # for these functions
+    component: p1
+  - placeholder: dummy
+    component: sink
+# ... #    
+type:
+- name: StackArray512
+  class: array
+  parameter:
+  - {name: baseType, value: OS_STK}
+  - {name: arrSize, value: '512'}
+- name: VoidPointer
+  class: foreign
+  targetName: "void*"
+#+END_src
+
+*** Template                                                  :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.47
+    :END:
++ \footnotesize =stdlib/std.c.ucosii.yaml=
+#+ATTR_LATEX: :options fontsize=\tiny
+#+BEGIN_src yaml 
+template:
+- name: ucosii_init_task
+  requirement:
+  - include: "includes.h"
+  - include: "system.h"
+  code: |
+    INT8U err;
+    
+    {% for task in tasks %}
+    err = OSTaskCreateExt ({{ task.name }}, NULL, 
+       &{{ interface(task.stack).name }}[
+    {{int(interface(task.stack).type.arrSize)-1}}],
+    {{ task.prio }}, {{ task.prio }}, 
+    &{{ interface(task.stack).name }}[0], 
+       {{ interface(task.stack).type.arrSize }}, 
+    (void *) 0, OS_TASK_OPT_STK_CHK);
+    {% endfor %}
+    
+    OSTaskDel(OS_PRIO_SELF);
+#+END_src
+
+** \mu{}C/OS-II Initialization Task
+*** Code                                                      :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.55
+    :END:
++ \footnotesize =myproj/main.c=
+#+ATTR_LATEX: :options fontsize=\tiny
+#+BEGIN_src c 
+// Generated with CoInSyDe : Code Synthesizer for System Design //
+// Included libraries
+#include "includes.h"
+#include "system.h"
+/* ... */
+// Global variables
+OS_STK init_sourceStk[512];
+OS_STK init_p1Stk[512];
+OS_STK init_sinkStk[512];
+/* ... */
+// Function declarations
+void source (void* pdata);
+void p1 (void* pdata);
+void sink (void* pdata);
+/* ... */
+void init (void* pdata) {
+    INT8U err;
+    err = OSTaskCreateExt (source, NULL, 
+          &init_sourceStk[511], 15, 15, &init_sourceStk[0], 
+          512, (void *) 0, OS_TASK_OPT_STK_CHK);
+    err = OSTaskCreateExt (p1, NULL, 
+          &init_p1Stk[511], 13, 13, &init_p1Stk[0], 
+          512, (void *) 0, OS_TASK_OPT_STK_CHK);
+    err = OSTaskCreateExt (sink, NULL, 
+          &init_sinkStk[511],  11, 11, &init_sinkStk[0], 
+	  512, (void *) 0, OS_TASK_OPT_STK_CHK);
+    OSTaskDel(OS_PRIO_SELF);
+}
+/* ... */
+#+END_src
+
+*** Template                                                  :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.47
+    :END:
++ \footnotesize =stdlib/std.c.ucosii.yaml=
+#+ATTR_LATEX: :options fontsize=\tiny
+#+BEGIN_src yaml 
+template:
+- name: ucosii_init_task
+  requirement:
+  - include: "includes.h"
+  - include: "system.h"
+  code: |
+    INT8U err;
+    
+    {% for task in tasks %}
+    err = OSTaskCreateExt ({{ task.name }}, NULL, 
+       &{{ interface(task.stack).name }}[
+    {{int(interface(task.stack).type.arrSize)-1}}],
+    {{ task.prio }}, {{ task.prio }}, 
+    &{{ interface(task.stack).name }}[0], 
+       {{ interface(task.stack).type.arrSize }}, 
+    (void *) 0, OS_TASK_OPT_STK_CHK);
+    {% endfor %}
+    
+    OSTaskDel(OS_PRIO_SELF);
+#+END_src
+
+** MPSoC Main Function (SDF)
+#+ATTR_LATEX: :options fontsize=\tiny
+#+BEGIN_src yaml 
+template:
+- name: comb_sdf 
+  requirement: [{include: "system.h"},{include: "altera_avalon_mutex.h"},{include: "lib/sm_fifo.h"}]
+  code: |
+    {% macro flag(arg0) %}{{concat(interface(arg0).name,'_flag')}}{% endmacro %}
+    {% macro mutex(arg0) %}{{concat(interface(arg0).name,'_mutex')}}{% endmacro %}
+    {% if inputs %}{% for input in inputs %}
+    alt_mutex_dev* {{mutex(input.port)}} = altera_avalon_mutex_open({{input.mutex}});
+    {% endfor %}{% endif %}
+    {% if outputs %}{% for output in outputs %}
+    alt_mutex_dev* {{mutex(output.port)}} = altera_avalon_mutex_open({{output.mutex}});
+    {% endfor %}{% endif %}
+    while (1){
+    {% if inputs %}{% for input in inputs %}
+      char {{flag(input.port)}} = 0;
+      while (!{{flag(input.port)}}) {
+       altera_avalon_mutex_lock({{mutex(input.port)}}, 1); 
+      if (!almostEmpty({{input.port}}, {{input.cons}})){{{flag(input.port)}} = 1;
+    {% for i in range(input.cons) %}
+       {{interface(input.var).name}}[{{i}}] = read({{input.port}});
+    {% endfor %} }
+      altera_avalon_mutex_unlock({{mutex(input.port)}});
+    }{% endfor %}{% endif %}    
+      {{placeholder("func")}}
+    {% if outputs %}{% for output in outputs %}
+      char {{flag(output.port)}} = 0; 
+      while (!{{flag(output.port)}}) {
+       altera_avalon_mutex_lock({{mutex(output.port)}}, 1); 
+       if (!almostFull({{output.port}}, {{output.prod}})){{{flag(output.port)}} = 1;
+    {% for i in range(output.prod) %}
+       write({{output.port}}, {{interface(output.var).name}}[{{i}}]);
+    {% endfor %}}
+      altera_avalon_mutex_unlock({{mutex(output.port)}});
+    }{% endfor %}{% endif %}    
+    }
+#+END_src
+
+** MPSoC Main Function (SDF)
+*** Spec                                                      :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.55
+    :END:
+#+ATTR_LATEX: :options fontsize=\tiny
+#+BEGIN_src yaml 
+pattern:
+- name: top_main_source
+  type: comb_sdf
+  interface:
+  - {name: s2p1,  class: port, type: SmFifo, 
+     constructor: mk_fifo}
+  - {name: obuff, class: var,  type: ArrayInt2}
+  - {name: st,    class: state, type: Int, value: '0'}
+  - {name: outputs, class: param, value:
+    [{var: obuff, port: s2p1, prod: 2, mutex: MUTEX_0}]}
+  instance:
+  - placeholder: func
+    component: source_func
+    bind:
+    - {replace: 1_ret,   with: obuff}
+    - {replace: 2_state, with: st}
+  - placeholder: mk_fifo
+    component: mkFifoWriter
+    bind:
+    - {replace: 1_baseAddress,
+       withValue: 'ONCHIP_SHARED_0_BASE'}
+    - {replace: 2_size, withValue: '6'}
+  requirement:
+    include: "system.h"
+# ... #
+native:    
+- name: source_func
+  interface:
+  - {name: 2_state, class: iarg, type: Int}
+  - {name: 1_ret, class: oarg, type: Int}
+  requirement: {include: "lib/funcs_sdf.c"}
+#+END_src
+
+*** Template                                                  :BMCOL:B_block:
+    :PROPERTIES:
+    :BEAMER_col: 0.47
+    :END:
++ \footnotesize =stdlib/std.c.es-mpsoc.yaml=
+#+ATTR_LATEX: :options fontsize=\tiny
+#+BEGIN_src c 
+// Generated with CoInSyDe : Code Synthesizer for System Design //
+// Included libraries
+#include "system.h"
+#include "altera_avalon_mutex.h"
+#include "lib/sm_fifo.h"
+#include "lib/funcs_sdf.c"
+// State variables
+int top_main_source_st;
+
+int main(int argc, char ** argv) {
+  top_main_source_st = 0;
+  int obuff[2];
+  sm_fifo s2p1 = mkFifoWriter (
+      ONCHIP_SHARED_0_BASE, 6);
+  alt_mutex_dev* s2p1_mutex = 
+      altera_avalon_mutex_open(MUTEX_0);
+  while (1){
+    source_func (obuff, &top_main_source_st);
+    char s2p1_flag = 0; 
+    while (!s2p1_flag) {
+      altera_avalon_mutex_lock(s2p1_mutex, 1); 
+      if (!almostFull(s2p1, 2)){
+        s2p1_flag = 1;
+        write(s2p1, obuff[0]);
+        write(s2p1, obuff[1]);    
+      }
+      altera_avalon_mutex_unlock(s2p1_mutex);
+    }  
+  }
+}
+#+END_src
+
+* Appendix
+** Extensions?
+
+#+ATTR_LATEX: :options fontsize=\footnotesize
+#+BEGIN_src haskell 
+CoInSyDe
+    CoInSyDe.Core                    -- databases, components
+        CoInSyDe.Core.Dict        
+    CoInSyDe.Frontend                -- API for reading spec files
+        CoInSyDe.Frontend.XML
+        CoInSyDe.Frontend.JSON
+    CoInSyDe.LibManage               -- library management functions
+    CoInSyDe.Backend                 -- everything related to target code
+        CoInSyDe.Backend.C           -- C family libraries
+            CoInSyDe.Backend.C.Core  -- types, variables, requirements
+            CoInSyDe.Backend.C.Proj  -- building a C-relevant database
+            CoInSyDe.Backend.C.Chain -- list of actions on 'Proj'
+            CoInSyDe.Backend.C.Pretty-- some pretty printers, used by 'Chain'
+        CoInSyDe.Backend.Gen         -- (generic) generator monad +
+                                     -- Ginger template wrappers 
+#+END_src
+** C Interface Definitions and Usage
+
+
+
+#+LATEX: \resizebox{.9\paperwidth}{!}{
+         |           | Decl        | Init             | IArgBind | OArgBind | IArgDef     | OArgDef      | OUse |
+         |-----------+-------------+------------------+----------+----------+-------------+--------------+------|
+         | =prim=    | =int a;=    | =a = 1;=         | =( a=    | =(&a=    | =(int a=    | =(int* a=    | =*a= |
+         | =enum=    | =e_t b;=    | =b = true;=      | =, b=    | =,&b=    | =,e_t b=    | =,e_t* b=    | =*b= |
+         | =struct=  | =s_t c;=    | =c.x=1; c.y=2;=  | =, c=    | =,&c=    | =,s_t c=    | =,s_t* c=    | =*c= |
+         | =array=   | =int d[3];= | =d = {1,2,3};=   | =, d=    | =, d=    | =,int* d=   | =,int* d=    | =d=  |
+         | =foreign= | =fifo* e;=  | =e = mkFifo(3);= | =, e);=  | =,?e);=  | =,fifo* e)= | =,fifo? e);= | =?e= |
+#+LATEX: }
+
+- "LUT" hard-coded in =CoInSyDe.Backend.C.Pretty=
+- =struct= initialization not yet supported (but easy to implement)
+- OUse changes the scoped name of the variable
+- foreigns specify their bind/def/use prefix
+- Question: Should pointers be in-built in CoInSyDe? (currently only as =foreign=)
+
+** Further questions
+
++ files as dictionaries or as target source with "commented" markup? (literate programming style)
++ Documentation generator? (Pandoc API)
++ Who takes care of function definition/call code? CoInSyDe or specialized templates?
+  - trade-off between generic and specialized
++ Does anyone even want to touch this thing?
+  + User API for custom chains (not that difficult, but... Haskell)
+  + Python/Java API wrappers?
+  + Any interest in developing another target? (VHDL, Arduino, ForSyDe-Haskell(!?), SiLago, ...)
++ Is anyone interested in building a focus group?

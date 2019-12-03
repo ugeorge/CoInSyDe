@@ -44,9 +44,9 @@ data CVal = NoVal      -- ^ no initialization
           | Val Text   -- ^ initialization value in textual format
           | Cons Name  -- ^ points to constructor referenced in the parent
                         -- component's 'InstMap'
-           deriving (Show, Read, Generic, NFData)
+           deriving (Show, Eq, Read, Generic, NFData)
 
-data Kind = LocVar | GlobVar | InArg | OutArg | RetArg | Get | Put
+data Kind = LocVar | GlobVar | InArg | OutArg | RetArg | Port
           deriving (Show,Read,Eq,Ord,Generic,NFData)
 
 -----------------------------------------------------------------
@@ -54,7 +54,7 @@ instance Target C where
   data Type C = PrimTy  {tyName :: Id} 
               | EnumTy  {tyName :: Id, enumVals  :: [(Text, Maybe Text)]}
               | Struct  {tyName :: Id, sEntries  :: Map Text (Type C)}
-              | ArrTy   {arrBaseTy :: Type C, arrSize :: Int}
+              | ArrTy   {tyName :: Id, arrBaseTy :: Type C, arrSize :: Int}
               | Foreign {tyName :: Id, oCallPrefix :: Text, oBindPrefix :: Text,
                          tyRequ :: [Requ C]}
               | NoTy    {tyName :: Id} -- ^ will always be void
@@ -79,8 +79,7 @@ instance Target C where
       "iarg"  -> mkGeneric InArg  typeLib node
       "oarg"  -> mkGeneric OutArg typeLib node
       "ret"   -> mkGeneric RetArg typeLib node
-      "iport" -> mkGeneric Get typeLib node
-      "oport" -> mkGeneric Put typeLib node
+      "port"  -> mkGeneric Port typeLib node
       "var"   -> mkGeneric LocVar typeLib node
       "state" -> mkState typeLib pId node
       "param" -> mkParam node
@@ -126,13 +125,15 @@ mkStruct tyLib tName pNodes = Struct tName (mkMap $ map extract pNodes)
 -- > type[@name=*,@class="array"]
 -- > - parameter[@name="baseType",@value=*]
 -- > - parameter[@name="size",@value=*]
-mkArray tyLib pNodes = ArrTy baseTy size
+mkArray tyLib pNodes = ArrTy (tyName baseTy) baseTy size
   where baseTy  = tyLib !* getParam "baseType" pNodes
         size    = fst $ either error id $ decimal $ getParam "size" pNodes
 
 -- | Makes a 'Foreign' type from a node
 --
 -- > type[@name=*,@class="foreign",@targetName=*]
+-- > ? parameter[@name="callPrefix", @value=*]
+-- > ? parameter[@name="bindPrefix", @value=*]
 -- > + requirement[@include=*]
 mkForeign tName pNodes = Foreign tName cPrefix bPrefix $ map mkRequ pNodes
   where cPrefix = getParam' "callPrefix" pNodes
@@ -155,11 +156,11 @@ getParam' name nodes = case filterByAttr "name" name nodes of
 
 ------ INTERFACE CONSTRUCTORS ------
 
--- | Can make an 'InArg', 'RetArg', 'Get', 'Put' or 'LocVar' respectively from
+-- | Can make an 'InArg', 'RetArg', 'Port' or 'LocVar' respectively from
 --
 -- > interface[@class=<class>,@name=*,@type=*,@?value=*,@?constructor=*]
 --
--- where @<class>@ can be @"iarg"|"oarg"|"ret"|"iport"|"oport"|"var"@
+-- where @<class>@ can be @"iarg"|"oarg"|"ret"|"port"|"var"@
 mkGeneric kind tyLib node = Variable name kind ty val
   where name = node @! "name"
         ty   = tyLib !* (node @! "type")
@@ -174,7 +175,10 @@ mkGeneric kind tyLib node = Variable name kind ty val
 mkState tyLib parentId node = Variable name GlobVar ty val
   where name = (parentId `snoc` '_') `append` (node @! "name")
         ty   = tyLib !* (node @! "type")
-        val  = maybe NoVal Val $ node @? "value"
+        val  = case (node @? "value", node @? "constructor") of
+                 (Nothing,Nothing) -> NoVal
+                 (Just a, Nothing) -> Val a
+                 (_, Just a)       -> Cons a
 
 -- | Makes a 'Macro' from a node
 --

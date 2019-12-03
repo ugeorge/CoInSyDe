@@ -7,6 +7,9 @@ module CoInSyDe.Backend.Gen (
   GeneratorException
   ) where
 
+import           CoInSyDe.Core
+import           CoInSyDe.Core.Dict
+
 import           Control.Exception
 import           Control.Monad.State.Lazy
 import           Control.Monad.Writer.Lazy
@@ -24,9 +27,7 @@ import           Data.Yaml.Pretty
 import           Text.Ginger
 import           Text.Ginger.GVal
 import           Text.Ginger.Run.Type (GingerContext (..),throwHere)
-
-import           CoInSyDe.Core
-import           CoInSyDe.Core.Dict
+import           Text.Ginger.Run.VM
 
 type Gen o l = State (GenState o l)
 
@@ -154,6 +155,8 @@ mkContext f d = makeContextTextExM look write except
                   (fromFunction $ mkFunction f) $
                   H.insert "range"
                   (fromFunction rangeF) $
+                  H.insert "interface"
+                  (fromFunction returnIfF) $
                   (H.map toGVal d)
 
 fromTemplate :: Target l
@@ -173,7 +176,7 @@ fromTemplate context tpl = do
 -- U kidding me?! Ginger has no 'range' function. I need to define it
 
 rangeF :: Monad m => Function (Run p m h)
-rangeF [] = return def
+rangeF [] = return def -- TODO: throw error
 rangeF ((_,x):_) = do
   xNum <- maybe (throwHere $ ArgumentsError (Just "range")
                   $ T.pack $ show x ++ " is not a number!")
@@ -181,7 +184,13 @@ rangeF ((_,x):_) = do
   xInt <- maybe (throwHere $ ArgumentsError (Just "range")
                   $ T.pack $ show x ++ " is not an integer!")
           return $ toBoundedInteger xNum
-  return $ toGVal $ ([0..xInt-1] :: [Int])
+  return $ toGVal ([0..xInt-1] :: [Int])
+
+returnIfF :: Monad m => Function (Run p m h)
+returnIfF [] = return def -- TODO: throw error
+returnIfF ((_,x):_) = do
+  context <- getVar (asText x)
+  return $ toGVal context
 
 ------------------------------------------------------------------
 
