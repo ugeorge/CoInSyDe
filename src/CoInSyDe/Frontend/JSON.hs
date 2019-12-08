@@ -17,6 +17,7 @@ module CoInSyDe.Frontend.JSON where
 import           CoInSyDe.Frontend
 
 import           Control.Exception (throw)
+import           Control.Monad (liftM)
 import           Data.Aeson
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
@@ -58,11 +59,15 @@ getObjects = map (\(Object c) -> c) . filter isObject
     isObject (Object _) = True
     isObject _ = False
 
-readJSON :: FilePath -> IO Object
-readJSON path = BL.readFile path >>=
-                either (throw . ParseException "") return . eitherDecode'
+readJSON :: BL.ByteString -> IO Object
+readJSON = either (throw . ParseException "") return . eitherDecode'
 
-readYAML :: FilePath -> IO Object
-readYAML path = BS.readFile path >>=
-                either (throw . ParseException "" . prettyPrintParseException) return
-                . decodeEither'
+readYAML :: BS.ByteString -> IO Object
+readYAML = either (throw . ParseException "" . prettyPrintParseException) return
+           . decodeEither'
+  
+withJSON :: FilePath -> (Object -> a) -> IO a
+withJSON path f = liftM f (BL.readFile path >>= readJSON)
+
+withYAML :: FilePath -> (Object -> a) -> IO a
+withYAML path f = liftM f (BS.readFile path >>= readYAML)

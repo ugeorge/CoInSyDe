@@ -21,8 +21,11 @@
 --   synthesizer from language family to a specific kind of implementation
 --   e.g. @C.ucosii.mbox_comm@.
 --
--- * @\<what\>@ is a tool-convenient way to tell CoInSyDe what the library file
---   holds. For now the only allowed identifiers are @type@ and @template@.
+-- * @\<what\>@ is a tool-convenient, yet mandatory way to tell CoInSyDe what the
+--   library file holds. Allowed keywords are @template@, @type@, @native@ or, if it
+--   contains different kinds of elements, it must be tagged with @mixed@. As a
+--   general rule, @mixed@ library files will be loaded slower than the others because
+--   they need to pass multiple checks each.
 --
 -- * @\<ext\>@ is the frontend file extension, supported by CoInSyDe. Check
 -- * "CoInSyDe.Frontend" to see the supported file types.
@@ -85,13 +88,11 @@ import qualified Data.ByteString as BS
 import CoInSyDe.Core
 import CoInSyDe.Core.Dict
 import CoInSyDe.Frontend
+import CoInSyDe.Frontend.C
 import CoInSyDe.Frontend.XML
 import CoInSyDe.Frontend.JSON
 
-
 ---------------------------------------------------------------------
-
-
 
 -- | Builds the path lists with all the library files used in loading the types,
 -- respectively component databases, according to the CoInSyDe library convention.
@@ -105,8 +106,9 @@ buildLoadLists target ldLibraryPath = do
       -- select only the paths compatible to the target
   let trgLibs  = (map . filter) (isOf target . getTrg) allPaths
       -- separate into two groups by what they contain: types and components
-      typeLibs = (map . filter) ((==".type") . getType) trgLibs
-      compLibs = (map . filter) ((`elem`[".template",".native"]) . getType) trgLibs
+      typeLibs = (map . filter) (elem ".type" . getType) trgLibs
+      compLibs = (map . filter)
+        ((\t -> ".template" `elem` t || ".native" `elem` t) . getType) trgLibs
       -- sort the two groups based on their respective loading rules
       ordTyLib = (map . sortOn) (length . getTrg) typeLibs
       ordCpLib = (reverse . map (reverse . sortOn (length . getTrg))) compLibs
@@ -129,8 +131,14 @@ buildLoadLists target ldLibraryPath = do
     getTrg  = fst . trgAndType
     getType = snd . trgAndType
 
--- "path/to/name.C.ucosii.type.xml" -> (".C.ucosii",".type")
-trgAndType = splitExtension . snd . splitExtensions . takeBaseName
+-- "path/to/name.C.ucosii.type.xml" -> (".c.ucosii",[".type"])
+-- "path/to/name.C.ucosii.mixed.xml" -> (".c.ucosii",[".type",".native",".template"])
+trgAndType path
+  | what == ".mixed" = (target,allowed)
+  | otherwise        = (target,[what])
+  where
+    (target,what) = splitExtension . snd . splitExtensions . takeBaseName $ path
+    allowed = [".type", ".native", ".template"]
 
 isOf target = all (`elem` mkTOrd target) . mkTOrd
   where mkTOrd = splitOn (pack ".") . pack
@@ -146,15 +154,16 @@ noNameDuplicates (paths,names)
 
 pathToNameList what path = 
   case takeExtension path of
-    ".xml" -> do
-      xml <- readXML path
-      return $ map (@!"name") $ childrenOf what xml
-    ".json" -> do
-      json <- readJSON path
-      return $ map (@!"name") $ childrenOf what json
-    ".yaml" -> do
-      yaml <- readYAML path
-      return $ map (@!"name") $ childrenOf what yaml
+    ".xml"  -> withXML  path $ map (@!"name") . childrenOf what
+    ".json" -> withJSON path $ map (@!"name") . childrenOf what
+    ".yaml" -> withYAML path $ map (@!"name") . childrenOf what
+    ".c" -> do
+      format <- cMarkup path
+      case format of
+        "xml"  -> withCXML  path $ map (@!"name") . childrenOf what
+        "json" -> withCJSON path $ map (@!"name") . childrenOf what
+        "yaml" -> withCYAML path $ map (@!"name") . childrenOf what
+        _ -> return []
     _ -> return []
 
 ---------------------------------------------------------------------
@@ -180,15 +189,9 @@ loadTypeLibs projF paths = foldM (catchL load) emptyDict paths >>=
                            \lib -> catchL load lib projF
   where
     load lib path = case takeExtension path of
-      ".xml" -> do
-        xml <- readXML path
-        return $ mkTypeLib lib path xml
-      ".json" -> do
-        json <- readJSON path
-        return $ mkTypeLib lib path json
-      ".yaml" -> do
-        yaml <- readYAML path
-        return $ mkTypeLib lib path yaml
+      ".xml"  -> withXML path  $ mkTypeLib lib path
+      ".json" -> withJSON path $ mkTypeLib lib path
+      ".yaml" -> withYAML path $ mkTypeLib lib path
       _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
 
 
@@ -227,22 +230,23 @@ loadCompDb' :: Target l
 loadCompDb' policy tyLib  = foldM (catchL load)
   where
     mkLib path = case snd (trgAndType path) of
-        ".template" -> mkTemplateLib policy path tyLib
-        ".native"   -> mkNativeLib policy path tyLib
-        _  -> \ l x -> flip (mkTemplateLib policy path tyLib) x
-                       $ flip (mkNativeLib policy path tyLib) x
-                       $ mkPatternLib policy path tyLib l x
+        [".template"] -> mkTemplateLib policy path tyLib
+        [".native"]   -> mkNativeLib policy path tyLib
+        _  -> \ l x   -> flip (mkTemplateLib policy path tyLib) x
+                         $ flip (mkNativeLib policy path tyLib) x
+                         $ mkPatternLib policy path tyLib l x
               
     load lib path = case takeExtension path of
-      ".xml" -> do
-        xml <- readXML path
-        return $ mkLib path lib xml
-      ".json" -> do
-        json <- readJSON path 
-        return $ mkLib path lib json
-      ".yaml" -> do
-        yaml <- readYAML path
-        return $ mkLib path lib yaml 
+      ".xml"  -> withXML path  $ mkLib path lib
+      ".json" -> withJSON path $ mkLib path lib
+      ".yaml" -> withYAML path $ mkLib path lib 
+      ".c" -> do
+        format <- cMarkup path
+        case format of
+          "xml"  -> withCXML  path $ mkLib path lib
+          "json" -> withCJSON path $ mkLib path lib
+          "yaml" -> withCYAML path $ mkLib path lib
+          _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
       _ -> putStrLn ("INFO: ignoring file " ++ show path) >> return lib
     
 ---------------------------------------------------------------------

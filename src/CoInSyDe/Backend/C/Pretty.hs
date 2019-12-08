@@ -20,7 +20,7 @@ import           CoInSyDe.Backend.C.Core
 import           Data.Aeson as JSON
 import qualified Data.HashMap.Strict as H
 import           Data.List (sortOn)
-import           Data.Text as T (Text,pack, unpack,append,words)
+import           Data.Text as T (append)
 import           Data.Text.Prettyprint.Doc
 import           Data.Text.Prettyprint.Doc.Render.Text
 
@@ -58,7 +58,7 @@ categorize is = do
     getOutput []  = return $ Variable "__OUT_" RetArg (NoTy "void") NoVal
     getOutput [a] = return a
     getOutput xs  = throwError $ "C cannot return more than one argument:\n"
-                          ++ show xs
+                    ++ show xs
 
 -------------------------------
 -- requirements generator
@@ -97,7 +97,7 @@ pTyDecl t = throwError $
 ---------------------------------------------
 
 --         | Decl      | Init          | IBind | OBind | IFDef     | OFDef     | OUse
--------------------------------------------------------------------------------|-------
+-- ----------------------------------------------------------------------------|-------
 -- prim    | int a;    | a = 1;        | f(a   | f(&a  | f(int a   | f(int* a  | *a
 -- enum    | e_t b;    | b = true;     |  ,b   |  ,&b  |  ,e_t b   |  ,e_t* b  | *b
 -- struct  | s_t c;    | c = mkStruct; |  ,c   |  ,&c  |  ,s_t c   |  ,s_t* c  | *c
@@ -115,7 +115,7 @@ pVDecl Macro{} = error "Macro should not be declared!"
 pVDecl i = case ifTy i of
   (ArrTy n b s) -> return $ pretty (tyName b) <+>
                  pretty (ifName i) <> brackets (pretty s)
-  _           -> return $ pretty (tyName $ ifTy i) <+> pretty (ifName i)
+  _             -> return $ pretty (tyName $ ifTy i) <+> pretty (ifName i)
 
 pVInit :: If C -> CGen
 pVInit i = case ifVal i of
