@@ -37,15 +37,15 @@ cMarkup path = do
 
 withCXML :: FilePath -> (XML.XML -> a) -> IO a
 withCXML path f = liftM f (alter <$> BL.readFile path >>= XML.readXML)
-  where alter = BL.unlines . map (BL.dropWhile (=='/')) . BL.lines
+  where alter = BL.unlines . map (BL.dropWhile (=='/')) . tail . BL.lines
 
 withCJSON :: FilePath -> (JSON.JSON -> a) -> IO a
 withCJSON path f = liftM f (alter <$> BL.readFile path >>= JSON.readJSON)
-  where alter = BL.unlines . map (BL.dropWhile (=='/')) . BL.lines
+  where alter = BL.unlines . map (BL.dropWhile (=='/')) . tail . BL.lines
 
 withCYAML :: FilePath -> (JSON.JSON -> a) -> IO a
 withCYAML path f = liftM f (alter <$> BS.readFile path >>= JSON.readYAML)
-  where alter = BS.unlines . map stripComments . BS.lines
+  where alter = BS.unlines . map stripComments . tail . BS.lines
         stripComments line
           | "//" `BS.isPrefixOf` line = BS.dropWhile (=='/') line
           | otherwise = "    " `BS.append` line
