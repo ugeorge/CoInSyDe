@@ -22,6 +22,7 @@ import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BL
 import           Data.Char
 import           Data.List
+import           Data.Maybe
 
 cMarkup :: FilePath -> IO String
 cMarkup path = do
@@ -37,15 +38,45 @@ cMarkup path = do
 
 withCXML :: FilePath -> (XML.XML -> a) -> IO a
 withCXML path f = liftM f (alter <$> BL.readFile path >>= XML.readXML)
-  where alter = BL.unlines . map (BL.dropWhile (=='/')) . tail . BL.lines
+  where alter = BL.unlines . map stripComments . tail . BL.lines
+        reFormat ln = BL.drop 3 $ fromMaybe ln $ BL.stripSuffix "*/" ln
+        stripComments line
+          | "///" `BL.isPrefixOf` line || "/**" `BL.isPrefixOf` line
+          = reFormat line
+          | otherwise = line
 
 withCJSON :: FilePath -> (JSON.JSON -> a) -> IO a
 withCJSON path f = liftM f (alter <$> BL.readFile path >>= JSON.readJSON)
-  where alter = BL.unlines . map (BL.dropWhile (=='/')) . tail . BL.lines
-
+  where alter = foldl stripComments "" . tail . BL.lines
+        reFormat ln = BL.drop 3 $ fromMaybe ln $ BL.stripSuffix "*/" ln
+        stripComments buff line
+          | "///" `BL.isPrefixOf` line || "/**" `BL.isPrefixOf` line
+          = buff +++ "\n" +++ reFormat line
+          | otherwise = buff +++ "\\n" +++ line
+        
 withCYAML :: FilePath -> (JSON.JSON -> a) -> IO a
 withCYAML path f = liftM f (alter <$> BS.readFile path >>= JSON.readYAML)
-  where alter = BS.unlines . map stripComments . tail . BS.lines
-        stripComments line
-          | "//" `BS.isPrefixOf` line = BS.dropWhile (=='/') line
-          | otherwise = "    " `BS.append` line
+-- withCYAML path f = alter <$> BS.readFile path
+  where alter = getBuff . foldl stripComments (False,0,-2,"") . tail . BS.lines
+        getBuff (_,_,_,b) = b
+        reFormat n ln = BS.drop (3 + n) $ fromMaybe ln $ BS.stripSuffix "*/" ln
+        stripComments (False,_,n,buff) line
+          | "///" `BS.isPrefixOf` line || "/**" `BS.isPrefixOf` line
+          = (True,  nSpaces line, 0, buff +-+ "\n" +-+ reFormat (nSpaces line) line)
+          | otherwise
+          = (False, 0,            n, buff +-+ "\n" +-+ BS.replicate (n+2) ' ' +-+ line)
+        stripComments (True,n,c,buff) line
+          | "///" `BS.isPrefixOf` line || "/**" `BS.isPrefixOf` line
+          = (True,  n, nSpaces line, buff +-+ "\n" +-+ reFormat n line)
+          | otherwise
+          = (False, 0,            c, buff +-+ "\n" +-+ BS.replicate (c+2) ' ' +-+ line)
+
+----------------------------------------------------------------
+
+infixr 5 +-+, +++
+(+-+) = BS.append
+(+++) = BL.append
+nSpaces = countSpaces 0 . BS.drop 3
+  where countSpaces n xs
+          | " " `BS.isPrefixOf` xs = countSpaces (n+1) (BS.tail xs)
+          | otherwise = n 
