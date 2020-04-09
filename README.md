@@ -4,6 +4,14 @@
 
 This guide is temporary and is subject to change. Better watch the API for the latest changes.
 
+### Project Configuration
+
+**UPDATE:** the *nix load schema was dropped in favor of local configurations. Usage of system paths have been discontinued, at least until the tool is more stable.
+
+When invoked, `coinsyde` will recursively search current folder, then parents for a configuration file `coinsyde.yaml` until it reaches the home or root folder. Whatever configuration entries are found in this file will override the default global configuration found in `$HOME/.coinsyde/global.yaml`
+
+To 
+
 ### Notation
 
 The tool recognizes `XML`, `JSON` and `YAML` files. Any input file needs to carry the same information, but in the format specific to its markup language. Check any tutorial on moving from one format to another, e.g. [this one](https://www.csestack.org/yaml-vs-json-vs-xml-difference/). Notable differences: 

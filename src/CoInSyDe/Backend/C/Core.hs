@@ -24,14 +24,15 @@ module CoInSyDe.Backend.C.Core (
   ) where
 
 import CoInSyDe.Core
-import CoInSyDe.Core.Dict
-import CoInSyDe.Frontend
+import CoInSyDe.Internal.Dict
+import CoInSyDe.Internal.YAML
 
+import Control.Monad (liftM)
 import GHC.Generics (Generic)
 import Control.DeepSeq (NFData)
 import Data.Text (Text,append,snoc)
-import Data.Text.Read
 
+import Data.YAML
 import qualified Data.Aeson as JSON
 
 -- | Defines the family of C target languages. In particular it defines a set of types
@@ -43,8 +44,8 @@ data C = C
 data CVal = NoVal      -- ^ no initialization
           | Val Text   -- ^ initialization value in textual format
           | Cons Name  -- ^ points to constructor referenced in the parent
-                        -- component's 'InstMap'
-           deriving (Show, Eq, Read, Generic, NFData)
+                       -- component's 'InstMap'
+          deriving (Show, Eq, Read, Generic, NFData)
 
 data Kind = LocVar | GlobVar | InArg | OutArg | RetArg | Port
           deriving (Show,Read,Eq,Ord,Generic,NFData)
@@ -53,43 +54,48 @@ data Kind = LocVar | GlobVar | InArg | OutArg | RetArg | Port
 instance Target C where
   data Type C = PrimTy  {tyName :: Id} 
               | EnumTy  {tyName :: Id, enumVals  :: [(Text, Maybe Text)]}
-              | Struct  {tyName :: Id, sEntries  :: Map Text (Type C)}
+              | Struct  {tyName :: Id, sEntries  :: [(Text, Type C)]}
               | ArrTy   {tyName :: Id, arrBaseTy :: Type C, arrSize :: Int}
               | Foreign {tyName :: Id, oCallPrefix :: Text, oBindPrefix :: Text,
                          tyRequ :: [Requ C]}
               | NoTy    {tyName :: Id} -- ^ will always be void
               deriving (Read, Show, Eq, Generic, NFData)
-  mkType _ typeLib node =
-    case node @! "class" of
+  mkType _ typeLib node = do
+    tClass       <- node @! "class" :: Parser Text
+    targetName   <- node @! "targetName"
+    parameters   <- node |= "parameter"
+    requirements <- node |= "requirement"
+    case tClass of
       "primitive" -> mkPrimTy targetName
       "enum"      -> mkEnumTy targetName parameters
       "struct"    -> mkStruct typeLib targetName parameters
       "array"     -> mkArray  typeLib parameters
-      "foreign"   -> mkForeign targetName requirements
-      x -> error $ "Type class " ++ show x ++ " is not recognized!"
-    where targetName   = node @! "targetName"
-          parameters   = node |= "parameter"
-          requirements = node |= "requirement"
+      "foreign"   -> mkForeign targetName parameters requirements
+      x -> failAtNode node $ "Type class " ++ show x ++ " is not recognized!"
+    where 
           
-  data If C = Macro    {ifName :: Id, macroVal :: JSON.Value}
+  data If C = Macro    {ifName :: Id, macroVal :: YamlNode}
             | Variable {ifName :: Id, ifKind :: Kind, ifTy :: Type C, ifVal :: CVal}
             deriving (Read, Show, Generic, NFData)
-  mkIf pId typeLib node =
-    case node @! "class" of
+  mkIf pId typeLib node = do
+    iClass <- node @! "class" :: Parser Text
+    case iClass of
       "iarg"  -> mkGeneric InArg  typeLib node
       "oarg"  -> mkGeneric OutArg typeLib node
       "ret"   -> mkGeneric RetArg typeLib node
       "port"  -> mkGeneric Port typeLib node
       "var"   -> mkGeneric LocVar typeLib node
       "state" -> mkState typeLib pId node
-      "param" -> mkParam node
-      x -> error $ "Glue of type " ++ show x ++ " is not recognized!"
-  mkMacro = Macro "__intern__" . JSON.String
+      "param" -> mkMacro node
+      x -> error $ "Interface of type " ++ show x ++ " is not recognized!"
+  mkParam = return . Macro "__internal__"
 
   data Requ C = Include Text deriving (Read, Show, Eq, Generic, NFData)
-  mkRequ node = Include (node @! "include")
+  mkRequ node = liftM Include (node @! "include")
 
 -----------------------------------------------------------------
+-- TODO: temporary. Will migrate everything to YAML.
+-- JSON conversions used for Ginger maps
 
 instance JSON.ToJSON CVal      where toEncoding = JSON.genericToEncoding JSON.defaultOptions
 instance JSON.ToJSON (Requ C)  where toEncoding = JSON.genericToEncoding JSON.defaultOptions
@@ -97,48 +103,55 @@ instance JSON.ToJSON (Type C)  where toEncoding = JSON.genericToEncoding JSON.de
 
 -----------------------------------------------------------------
 
-
 ------ TYPE CONSTRUCTORS ------
 
 -- | Makes a 'PrimTy' or 'NoTy' (void) from a node
 --
 -- > type[@name=*,@class="primitive",@targetName=*]
-mkPrimTy "void" = NoTy "void"
-mkPrimTy tName  = PrimTy tName
+mkPrimTy :: Text -> Parser (Type C)
+mkPrimTy "void" = return $ NoTy "void"
+mkPrimTy tName  = return $ PrimTy tName
 
 -- | Makes a 'EnumTy' from a node
 --
 -- > type[@name=*,@class="enum",@targetName=*]
 -- > + parameter[@name=*,@?value=*]
-mkEnumTy tName pNodes = EnumTy tName (map extract pNodes)
-  where extract n = (n @! "name", n @? "value")
+mkEnumTy :: Text -> [YamlNode] -> Parser (Type C)
+mkEnumTy tName pNodes = fmap (EnumTy tName) (mapM extract pNodes)
+  where extract n = (,) <$> n @! "name" <*> n @? "value"
 
 -- | Makes a 'Struct' from a node
 --
 -- > type[@name=*,@class="struct",@targetName=*]
--- > + parameter[@name=*,@type=*]
-mkStruct tyLib tName pNodes = Struct tName (mkMap $ map extract pNodes)
-  where extract n = (n @! "name", tyLib !* (n @! "type"))
+-- > - parameter: [{@name=*,@type=*}]
+mkStruct :: MapH (Type C) -> Text -> [YamlNode] -> Parser (Type C)
+mkStruct tyLib tName pNodes = fmap (Struct tName) (mapM extract pNodes)
+  where extract n = do
+          name <- n @! "name"
+          ty   <- n @! "type"
+          return (name, tyLib !* ty)
 
 -- | Makes an 'ArrTy' from a node
 --
 -- > type[@name=*,@class="array"]
--- > - parameter[@name="baseType",@value=*]
--- > - parameter[@name="size",@value=*]
-mkArray tyLib pNodes = ArrTy (tyName baseTy) baseTy size
-  where baseTy  = tyLib !* getParam "baseType" pNodes
-        size    = fst $ either error id $ decimal $ getParam "size" pNodes
+-- > - parameter: {@baseType=*, @size=*}
+mkArray :: MapH (Type C)  -> [YamlNode] -> Parser (Type C)
+mkArray tyLib pNodes = do
+  baseTy <- (head pNodes) @! "baseType"
+  size   <- (head pNodes) @! "size"
+  return $ ArrTy baseTy (tyLib !* baseTy) size
 
 -- | Makes a 'Foreign' type from a node
 --
 -- > type[@name=*,@class="foreign",@targetName=*]
--- > ? parameter[@name="callPrefix", @value=*]
--- > ? parameter[@name="bindPrefix", @value=*]
+-- > - parameter {@?callPrefix=*, @?bindPrefix=*}
 -- > + requirement[@include=*]
-mkForeign tName pNodes = Foreign tName cPrefix bPrefix $ map mkRequ pNodes
-  where cPrefix = getParam' "callPrefix" pNodes
-        bPrefix = getParam' "bindPrefix" pNodes
-
+mkForeign :: Text -> [YamlNode] -> [YamlNode] -> Parser (Type C)
+mkForeign tName params requs = do
+  cPrefix <- if null params then return "" else (head params) @! "callPrefix"
+  bPrefix <- if null params then return "" else (head params) @! "bindPrefix"
+  requmnt <- mapM mkRequ requs
+  return $ Foreign tName cPrefix bPrefix requmnt
     
 -- -- | Makes a 'PtrTy' type from a node
 -- --
@@ -147,12 +160,6 @@ mkForeign tName pNodes = Foreign tName cPrefix bPrefix $ map mkRequ pNodes
 -- mkPtrTy tyLib pNodes = PtrTy tName baseTy
 --   where baseTy  = tyLib !* getParam "baseType" pNodes
 --         tName   = tyName baseTy
-                
-getParam name nodes = head (filterByAttr "name" name nodes) @! "value"
-getParam' name nodes = case filterByAttr "name" name nodes of
-  []  -> ""
-  [x] -> x @! "value"
-
 
 ------ INTERFACE CONSTRUCTORS ------
 
@@ -161,32 +168,40 @@ getParam' name nodes = case filterByAttr "name" name nodes of
 -- > interface[@class=<class>,@name=*,@type=*,@?value=*,@?constructor=*]
 --
 -- where @<class>@ can be @"iarg"|"oarg"|"ret"|"port"|"var"@
-mkGeneric kind tyLib node = Variable name kind ty val
-  where name = node @! "name"
-        ty   = tyLib !* (node @! "type")
-        val  = case (node @? "value", node @? "constructor") of
-                 (Nothing,Nothing) -> NoVal
-                 (Just a, Nothing) -> Val a
-                 (_, Just a)       -> Cons a
+mkGeneric :: Kind -> MapH (Type C) -> YamlNode -> Parser (If C)
+mkGeneric kind tyLib node = do
+  name <- node @! "name"
+  ty   <- node @! "type"
+  val  <- node @? "value"
+  cstr <- node @? "constructor"
+  let value = case (val, cstr) of
+                (Nothing,Nothing) -> NoVal
+                (Just a, Nothing) -> Val a
+                (_, Just a)       -> Cons a
+  return $ Variable name kind (tyLib !* ty) value
 
 -- | Makes a 'GlobVar' from a node
 --
 -- > intern[@class="state",@name=*,@type=*,@value=*]
-mkState tyLib parentId node = Variable name GlobVar ty val
-  where name = (parentId `snoc` '_') `append` (node @! "name")
-        ty   = tyLib !* (node @! "type")
-        val  = case (node @? "value", node @? "constructor") of
-                 (Nothing,Nothing) -> NoVal
-                 (Just a, Nothing) -> Val a
-                 (_, Just a)       -> Cons a
+mkState :: MapH (Type C) -> Id -> YamlNode -> Parser (If C)
+mkState tyLib parentId node = do
+  name <- node @! "name"
+  ty   <- node @! "type"
+  val  <- node @? "value"
+  cstr <- node @? "constructor"
+  let value = case (val, cstr) of
+                (Nothing,Nothing) -> NoVal
+                (Just a, Nothing) -> Val a
+                (_, Just a)       -> Cons a
+  return $ Variable ((parentId `snoc` '_') `append` name) GlobVar (tyLib !* ty) value
 
 -- | Makes a 'Macro' from a node
 --
 -- > intern[@class="param",@name=*,@value=*]
-mkParam node = Macro name val
-  where name = node @! "name"
-        val  = node @: "value"
+mkMacro :: YamlNode -> Parser (If C)
+mkMacro node = Macro <$> node @! "name" <*> node @! "value"
 
+--------------------------------------------------
 
 isPrimitive PrimTy{}  = True
 isPrimitive _         = False

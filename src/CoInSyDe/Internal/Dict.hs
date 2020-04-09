@@ -11,7 +11,7 @@
 -- This module contains a generic container for a "dictionary", which is to be used as
 -- a database of components or types, along with their load history.
 ----------------------------------------------------------------------
-module CoInSyDe.Core.Dict (
+module CoInSyDe.Internal.Dict (
   -- * CoInSyDe 'Map' Type
   Id, Map, mkMap, ids, entries, idEntries, (!?!),
   -- * History-Bookkeeping Map
@@ -27,10 +27,11 @@ import Data.Text as T (Text,unpack)
 import qualified Data.HashMap.Strict as M
 import Data.Hashable (Hashable)
 
+import Data.YAML (Pos(..),Parser)
+import CoInSyDe.Internal.YAML (getPos, YamlNode, YamlDoc(..))
+
 import Text.Pretty.Simple (pShow)
 import qualified Data.Text.Lazy as TL (unpack)
-
-import CoInSyDe.Frontend (FNode,getInfo)
 
 -- | Generic identifier used as library search key
 type Id = Text 
@@ -43,10 +44,13 @@ type Map k t = M.HashMap k t
 type MapH t = Map Id (t,[Info])
 
 -- | Stores information about the current entry (e.g. component).
-data Info = Info {ldFile :: FilePath, ldInfo :: String} deriving (Read,Show)
+data Info = Info { ldFile :: FilePath
+                 , ldLine :: Int
+                 , ldCol :: Int
+                 } deriving (Read,Show)
 
-prettyInfo (Info f "") = f
-prettyInfo (Info f i)  = f ++ " (" ++ i ++ ")"
+prettyInfo (Info f (-1) (-1)) = f
+prettyInfo (Info f l c)  = f ++ " (" ++ show l ++ ":" ++ show c ++ ")"
 
 instance NFData Info where
   rnf _ = ()
@@ -85,9 +89,11 @@ mkDict = M.fromList . map (\(i,c,h) -> (i,(c,h)))
 
 emptyDict = M.empty
 
-mkInfoNode :: FNode n => FilePath -> n -> Info
-mkInfoNode path n = Info path (getInfo n)
-
+mkInfoNode :: YamlDoc -> YamlNode -> Parser Info
+mkInfoNode doc node = do
+  pos <- getPos node
+  return $ Info (yamlPath doc) (posLine pos) (posColumn pos)
+   
 -- | Inserts an entry into a 'MapH'. Depending on the 'Policy', if the entry exists:
 --
 -- * 'Replace' : replaces it and updates the history as the \"newest\" entry.

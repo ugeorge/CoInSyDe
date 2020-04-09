@@ -8,7 +8,7 @@ module CoInSyDe.Backend.Gen (
   ) where
 
 import           CoInSyDe.Core
-import           CoInSyDe.Core.Dict
+import           CoInSyDe.Internal.Dict
 
 import           Control.Exception
 import           Control.Monad.State.Lazy

@@ -13,11 +13,13 @@ module CoInSyDe.Backend.C.Pretty (
   ) where
 
 import           CoInSyDe.Core
-import           CoInSyDe.Core.Dict
+import           CoInSyDe.Internal.Dict
 import           CoInSyDe.Backend.Gen
 import           CoInSyDe.Backend.C.Core
 
 import           Data.Aeson as JSON
+import qualified Data.YAML as YAML
+
 import qualified Data.HashMap.Strict as H
 import           Data.List (sortOn)
 import           Data.Text as T (append)
@@ -86,7 +88,7 @@ pTyDecl (EnumTy nm vals) = return $
 
 pTyDecl (Struct nm types) = return $
   "struct" <+> pretty nm
-  <+> (sepDef semi . map initType) (idEntries types) <> semi
+  <+> (sepDef semi . map initType) types <> semi
   where initType (n, ty) = pretty n <+> pretty (tyName ty) 
 
 pTyDecl t = throwError $
@@ -132,7 +134,7 @@ pVDeclInit i = case ifVal i of
 pVIBind :: If C -> CGen
 pVIBind i
   | isMacro i  = case macroVal i of
-                   JSON.String a -> return $ pretty a
+                   YAML.Scalar _ (YAML.SStr a) -> return $ pretty a
                    _ -> throwError $ "Macro expanded in code is not string\n" ++ show i
   | isGlobal i = case ifTy i of
                    ArrTy{} -> return $ pretty (ifName i)
@@ -268,9 +270,14 @@ pFunCode cIfs cRefs tpl = do
 makeJsonMap refs cIfs = -- H.insert "instance" (toJSON $ sort refs)
   (H.map toJSON cIfs) 
 
+-- TODO: temporary. Will migrate everything to YAML.
 instance ToJSON (If C)  where
-  toJSON (Macro _ val) = val
+  toJSON (Macro _ val) = toJSON val
   toJSON i@(Variable _ OutArg t v) =
     object ["name" .= pVOUse i, "type" .= toJSON t, "value" .= toJSON v]
   toJSON (Variable n _ t v) =
     object ["name" .= n, "type" .= toJSON t, "value" .= toJSON v]
+
+instance ToJSON (YAML.Node YAML.Pos) where
+  toJSON = either (error "invalid YAML-to-JSON conversion") id
+           . JSON.eitherDecode' . YAML.encode1

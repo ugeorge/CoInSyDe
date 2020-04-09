@@ -21,7 +21,7 @@ import Data.Maybe          as J
 import Data.Text           as T
 
 import CoInSyDe.Core
-import CoInSyDe.Core.Dict
+import CoInSyDe.Internal.Dict
 import CoInSyDe.Backend.C.Core
 
 -- | Structure for a C project.
@@ -77,6 +77,7 @@ updateProj db cp proj =
     newTypes    = nub $ allTypes proj ++ L.filter canDeclare currTypes
     -- transfer component as-is
     newFuncs    = dictTransfer (cpName cp) db (allFuncs proj)
+    
     ---------- DIFFERENT BETWEEN COMPONENT TYPES ----------
     -- if it is a component, continue traversing the project
     go cp@TmComp{} = traverseProj db cp
@@ -89,6 +90,7 @@ updateProj db cp proj =
     -- declaration list
     newFunDecls cp@NvComp{} = maybe (L.delete (cpName cp) (funDecls proj))
       (const $ funDecls proj) (funCode cp)
+      
     ---------- AUXILLIARY FUNCTIONS ----------
     canDeclare x = not $ isForeign x || isPrimitive x || isArray x
     currTypes    = J.mapMaybe getTypeOf (M.elems $ ifs cp)

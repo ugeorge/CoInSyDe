@@ -86,7 +86,7 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString as BS
 
 import CoInSyDe.Core
-import CoInSyDe.Core.Dict
+import CoInSyDe.Internal.Dict
 import CoInSyDe.Frontend
 import CoInSyDe.Frontend.C
 import CoInSyDe.Frontend.XML

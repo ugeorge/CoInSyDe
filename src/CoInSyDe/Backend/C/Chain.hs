@@ -17,7 +17,7 @@
 module CoInSyDe.Backend.C.Chain where
 
 
-import CoInSyDe.Core.Dict
+import CoInSyDe.Internal.Dict
 import CoInSyDe.Backend.Gen
 import CoInSyDe.Backend.C.Proj
 import CoInSyDe.Backend.C.Pretty
