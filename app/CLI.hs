@@ -15,10 +15,9 @@ import System.IO
 import Data.Time.Clock (getCurrentTime)
 
 
-import Control.Exception
+-- import Control.Exception
 import Control.Monad
 import Data.Maybe
-import Text.Pandoc.Builder (Blocks)
 import Text.Pretty.Simple
 -- import Data.List
 -- import Data.Text (unpack)
@@ -32,10 +31,15 @@ import CoInSyDe.Internal.LibManage
 import CoInSyDe.Internal.Map
 import CoInSyDe.Internal.YAML (YNode)
 
+data CLIConfig = CLIConfig { force   :: Bool
+                           , docs    :: Maybe String
+                           , docopts :: [String]
+                           } deriving (Show)
+
 main = do
   -- load options and configurations
-  (debug,force,doc,projs) <- getArgs >>= parse
-  when debug $ print (force,doc,projs)
+  (debug,cliconf,projs) <- getArgs >>= parse
+  when debug $ print (cliconf,projs)
   mroot <- getCurrentDirectory >>= searchProjRootDir
   root  <- maybe (die $ "Not inside a workspace!\nRerun command with '--help' "
                    ++"to see how initialize a workspace") return mroot
@@ -63,48 +67,56 @@ main = do
     -- CoInSyDe.Target.getTargetProxy (projTarget conf)
     
     -- load the libraries
-    -- TODO: use proxys
-    let load proxy (what,paths) = do
-          reload <- shouldReloadLib conf what paths
-          if reload
-            then do lib <- loadLibs what paths
-                    dumpObj conf what lib
-                    return lib
-            else loadObj conf what
             
     -- tyLib <- load tys :: IO ([YNode])
     -- when debug $ dbgPrettyLib conf (fst tys) tyLib
 
-    nvLib <- load () nvs :: IO (MapH (YNv YNode YNode))
+    nvLib <- loadLibraryObj cliconf gconf conf () nvs :: IO (MapH (YNv YNode YNode))
     when debug $ dbgPrettyLib conf (fst nvs) nvLib
 
-    tmLib <- load () tms :: IO (MapH (YTm YNode YNode))
+    tmLib <- loadLibraryObj cliconf gconf conf () tms :: IO (MapH (YTm YNode YNode))
     when debug $ dbgPrettyLib conf (fst nvs) tmLib
     
-    ptLib <- load () pts :: IO (MapH (YPt YNode YNode))
+    ptLib <- loadLibraryObj cliconf gconf conf () pts :: IO (MapH (YPt YNode YNode))
     when debug $ dbgPrettyLib conf (fst pts) ptLib
 
-    when (not $ isNothing doc) $ dumpLibraryDoc gconf conf doc
+    unless (isNothing $ docs cliconf) $ dumpLibraryDoc cliconf gconf conf
       [ ("Patterns", toDoc "cp" ptLib)
       , ("Native Components", toDoc "cp" nvLib)
       , ("Template Components", toDoc "cp" tmLib) ]
   
   print projConfigs
 
-dumpLibraryDoc :: SuiteConfig -> ProjConfig -> Maybe String
-               -> [(String, Blocks)] -> IO ()
-dumpLibraryDoc gconf conf (Just format) content
+-- TODO: use proxy
+-- loadLibraryObj :: (FromYAML a, Binary a)
+--                => ProjConfig -> ()
+--                -> (String,[FilePath]) -> IO (MapH a)
+loadLibraryObj cliconf gconf conf proxy (what,paths) 
+  = withCurrentDirectory (workspaceRoot gconf) $ do
+  reload <- shouldReloadLib conf what paths
+  if reload || force cliconf
+    then do lib <- loadLibs what paths
+            dumpObj conf what lib
+            return lib
+    else loadObj conf what
+
+-- dumpLibraryDoc :: SuiteConfig -> ProjConfig -> Maybe String
+--                -> [(String, Blocks)] -> IO ()
+dumpLibraryDoc cliconf gconf conf content
   = withCurrentDirectory (workspaceRoot gconf) $ do
   createDirectoryIfMissing True (projDocs conf)
   time <- getCurrentTime
-  let jsonFile = projDocs conf </> "Libs" <.> "json"
+  let format   = fromJust $ docs cliconf
+      otherOpt = docopts cliconf
+      jsonFile = projDocs conf </> "Libs" <.> "json"
       docFile  = projDocs conf </> "Libs" <.> format
       pandoc   = makeDoc "Loaded Libraries" (projName conf)
                  (targetidToText $ projTarget conf) (show time)
                  (coinsydeVersion gconf) (workspaceRoot gconf) content
   writePandocJson jsonFile pandoc
-  -- TODO: output stdout and stderr
-  _ <- createProcess $ proc "pandoc" ["--from=json", "--to=" ++ format, "--table-of-contents", "--output=" ++ docFile, jsonFile]
+  _ <- createProcess (proc "pandoc" $
+                       ["--from=json", "--to=" ++ format, "--table-of-contents"
+                       , "--output=" ++ docFile] ++ otherOpt ++ [jsonFile])
   return ()
        
   
@@ -198,6 +210,7 @@ data Flag
   | New
   | Force
   | Docs String
+  | DocOpt String
   deriving (Eq,Ord,Show)
 
 flags =
@@ -214,6 +227,8 @@ flags =
     "Forces parsing libraries even if they can be loaded from dumped objects"
   , Option ['D'] ["docs"] (OptArg (Docs . fromMaybe "") "FORMAT")
     "Dumps the documentation for current project in given format. Default is html."
+  , Option [] ["pandoc-opt"] (OptArg (Docs . fromMaybe "") "OPT")
+    "Dumps the documentation for current project in given format. Default is html."
   ]
 header = "Usage: f2c [options] [projects]"
 
@@ -226,13 +241,14 @@ parse argv =
                      []   -> Nothing
                      [""] -> Just "html"
                      [x]  -> Just x
+          docopt = [ x | DocOpt x <- args]
       when (Help `elem` args) $ do
         hPutStrLn stderr (usageInfo header flags)
         exitSuccess
       when (Init `elem` args) $ do
         makeDefaultConfig
         exitSuccess
-      return $ (debug,force,docs,projs)
+      return $ (debug, CLIConfig force docs docopt, projs)
     (_,_,errs) -> do
       hPutStrLn stderr (concat errs ++ usageInfo header flags)
       exitWith (ExitFailure 1)
