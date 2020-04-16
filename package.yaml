@@ -27,43 +27,30 @@ description:         Please see the README on GitHub at <https://github.com/gith
 
 dependencies:
 - base >= 4.7 && < 5
-- xml
+- binary <= 0.8.8.0
 - HsYAML
 - text
+- time
 - unordered-containers
-- containers
-- ginger
+# for documentation generation
+- pandoc-types >= 1.20
+- aeson
+# I/O utilities
 - pretty-simple >= 3
 - filepath
+- process
 - bytestring >= 0.10
 - directory >= 1.2
-- scientific
-# - binary
-- deepseq
-- aeson
-- yaml
-- vector
-- data-default
-- mtl
-- hashable
-- prettyprinter
-# when:
-# - condition: flag(dynamic)
-#   dependencies:
-#   - ghc
-#   - ghc-lib
-
-
 
 library:
   source-dirs: src
   
 executables:
-  f2c:
-    main:                F2C.hs
+  coinsyde:
+    main:                CLI.hs
     source-dirs:         app
     ghc-options:
-    - -main-is           F2C
+    - -main-is           CLI
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N

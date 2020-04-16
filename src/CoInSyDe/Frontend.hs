@@ -1,90 +1,191 @@
-----------------------------------------------------------------------
--- |
--- Module      :  CoInSyDe.Frontend
--- Copyright   :  (c) George Ungureanu, 2019
--- License     :  BSD-style (see the file LICENSE)
--- 
--- Maintainer  :  ugeorge@kth.se
--- Stability   :  experimental
--- Portability :  portable
---
--- This module contains a common wrapper API for reading different
--- tree-based frontend languages, such as XML or JSON.
-----------------------------------------------------------------------
+{-# LANGUAGE DeriveGeneric, FlexibleInstances, OverloadedStrings #-}
 module CoInSyDe.Frontend where
 
-import Data.Text (Text,pack)
-import Data.ByteString.Lazy (ByteString)
-import Control.Exception
-import Data.Typeable (Typeable)
-import qualified Data.Aeson as JSON
+import Control.Monad (foldM)
+import Data.Binary
+import Data.Maybe (fromMaybe)
+import Data.Text as T (Text,unpack)
+import Data.Text.Lazy (toStrict)
+import Data.Text.Lazy.Encoding (decodeUtf8)
+import Data.YAML
+import Data.YAML.Event (Tag)
+import GHC.Generics
+import Text.Pandoc.Builder
 
--- | Exceptions for more meaningful frontend-related error messages.
-data FrontendException
-  = ParseException String String -- ^ Contains parser info + custom message
-  -- | TemplateException String
-  | EmptyFile
-  deriving (Typeable)
-instance Exception FrontendException
+import CoInSyDe.Internal.Map
+import CoInSyDe.Internal.YAML
+import CoInSyDe.Internal.Docs
 
-instance Show FrontendException where
-  show (ParseException info msg) = "Parse exception (" ++ info ++ "): " ++ msg
-  show EmptyFile = "Empty file!" 
+-----------------------------------------------------------
 
--- | This is a minimal implementation for a tree-like object parser. The only type
--- needed to be wrapped is the node element specific to the frontend representation.
-class Show f => FNode f where
-  -- | Returns a list with all the child nodes with a certain name
-  children :: String  -> f -> [f]
-  -- | Returns either the value of a certain attribute or a specific error message.
-  getStrAttr :: String -> f -> Either String Text
-  -- | Gets the text content from a node.
-  getJsonAttr :: String -> f -> Either String JSON.Value
-  -- | Gets the text content from a node.
-  getTxt :: f -> Text
-  -- | Gets info about element as string
-  getInfo :: f -> String
+data YPt req port = YPt { yptName   :: Id
+                        , yptType   :: Id
+                        , yptPorts   :: Map port
+                        , yptParams :: Map YNode
+                        , yptRefs   :: Map YRef
+                        , yptReqs   :: [req]
+                        } deriving (Show, Generic)
 
--- | Infix operator for 'children'.
-(|=) :: FNode f => f -> String -> [f]
-node |= name = children name node
+instance (Binary req, Binary port) => Binary (YPt req port)
 
--- | Maybe-wrapped infix operator for 'getStrAttr'.
-(@?) :: FNode f => f -> String -> Maybe Text
-node @? attr = case getStrAttr attr node of
-                 Right val -> Just val
-                 Left _    -> Nothing
+instance (FromYAML req, FromYAML port) => FromYAML (YPt req port) where
+  parseYAML = withMap "Pattern component" $ \r -> do
+    name  <- r .:  "name"
+    kind  <- r .:  "type"
+    ports <- r .:? "ports"        >>=? parseMap "name" "Port list"       .!= emptyMap
+    param <- r .:? "parameters"   >>=? parseMap "name" "Parameter list"  .!= emptyMap
+    refs  <- r .:? "instances"    >>=? parseMap "placeholder" "Refs list".!= emptyMap
+    requs <- r .:? "requirements" >>=? parseYAML .!= []
+    return $ YPt name kind ports param refs requs
 
--- | Unsafe infix operator for 'getStrAttr'. Throws a 'ParseException' in
--- case attribute not found.
-(@!) :: FNode f => f -> String -> Text
-node @! attr = case getStrAttr attr node of
-                 Right val -> val
-                 Left  msg -> throw (ParseException (getInfo node) msg)
+instance (ToDoc req, ToDoc port) => ToDoc (YPt req port) where
+  toDoc _ cp = definitionList
+    [ (text "template: " <>  ilink "cp" (yptType cp), [btext ""])
+    , (text "ports:", map portList $ idEntries $ yptPorts cp)
+    , (text "parameters:", map paramList $ idEntries $ yptParams cp)
+    , (text "extra parameters:", map rowTab unameBRows)
+    , (text "requirements:", [rowTabWith (toDoc "") $ yptReqs cp]) -- TODO
+    ]
+    where
+      fbinds      = formattedBinds (yptRefs cp)
+      nameBRows n = maybe [] (map fst) $ fbinds !? n
+      unameBRows  = maybe [] (map (\(bl, YParam x) -> [toDoc "" x, bl]))
+                    $ fbinds !? "_internal_"
+      ------------------------------------------------------
+      portList (n,p) = rowTab
+        [ simpleTable [] [[plain $ ibold n <> strong ": ",  toDoc "" p]]
+        , bulletList (nameBRows n) ]
+      paramList (n,p) = rowTab
+        [ definitionList [(ibold n <> strong ": ", [toDoc "" p])]
+        , bulletList (nameBRows n) ]
 
--- | Same as 'getBoolAttr' but with the default set to 'False'.
-(@^) :: FNode f => f -> String -> Bool
-node @^ attr = case getJsonAttr attr node of
-                 Right (JSON.Bool b) -> b
-                 _                   -> False
+-----------------------------------------------------------
 
--- | Same as 'getBoolAttr' but with the default set to 'False'.
-(@:) :: FNode f => f -> String -> JSON.Value
-node @: attr = case getJsonAttr attr node of
-                 Right v  -> v
-                 Left msg -> throw (ParseException (getInfo node) msg)
+data YTm req port = YTm { ytmName   :: Id
+                        , ytmPorts  :: Map YNode  -- for documentation only
+                        , ytmParams :: Map YNode  -- same
+                        , ytmReqs   :: [req]
+                        , ytmTpl    :: Text
+                        } deriving (Show, Generic)
 
--- | Same as 'children', but looks for several node names instead of just one.
-childrenOf :: FNode f => [String] -> f -> [f]
-childrenOf names node = concatMap (`children` node) names
+instance (Binary req, Binary port) => Binary (YTm req port)
 
--- | Predicate function for testing if an atribute exists and has a certain value.
-hasValue :: FNode f => String -> String -> f -> Bool
-hasValue attr val node = case getStrAttr attr node of
-                           Right f -> pack val == f
-                           Left  _ -> False
+instance (FromYAML req, FromYAML port) => FromYAML (YTm req port) where
+  parseYAML = withMap "Template component" $ \r -> do
+    name  <- r .:  "name"
+    ports <- r .:? "ports"        >>=? parseMap "name" "Port list"      .!= emptyMap
+    param <- r .:? "parameters"   >>=? parseMap "name" "Parameter list" .!= emptyMap
+    requs <- r .:? "requirements" >>=? parseYAML .!= []
+    templ <- r .:  "template"
+    return $ YTm name ports param requs templ
 
--- | Filters a list of node based on a 'hasValue' predicate.
-filterByAttr :: FNode f => String -> String -> [f] -> [f]
-filterByAttr attr val = filter (attr `hasValue` val)
+instance (ToDoc req, ToDoc port) => ToDoc (YTm req port) where
+  toDoc _ cp = definitionList
+    [ (text "ports:", map portList $ idEntries $ ytmPorts cp)
+    , (text "parameters:", map paramList $ idEntries $ ytmParams cp)
+    , (text "requirements:", [rowTabWith (toDoc "") $ ytmReqs cp]) -- TODO
+    , (text "template code:", [codeBlock $ ytmTpl cp])
+    ]
+    where
+      portList (n,p)  = simpleTable [] [[plain $ ibold n <> strong ": ",  (toDoc "") p]]
+      paramList (n,p) = definitionList [(ibold n <> strong ": ", [(toDoc "") p])]
 
+-----------------------------------------------------------
+
+data YNv req port = YNv { ynvName  :: Id
+                        , ynvPorts :: Map port
+                        , ynvReqs  :: [req]
+                        , ynvCode  :: Id
+                        } deriving (Show, Generic)
+
+instance (Binary req, Binary port) => Binary (YNv req port)
+
+instance (FromYAML req, FromYAML port) => FromYAML (YNv req port) where
+  parseYAML = withMap "Native component" $ \r -> do
+    name  <- r .: "name"
+    ports <- r .:? "ports"        >>=? parseMap "name" "Port list" .!= emptyMap
+    requs <- r .:? "requirements" >>=? parseYAML .!= []
+    code  <- r .:? "code" .!= ""
+    return $ YNv name ports requs code
+
+instance (ToDoc req, ToDoc port) => ToDoc (YNv req port) where
+  toDoc _ cp = definitionList
+    [ (text "ports:", map portList $ idEntries $ ynvPorts cp)
+    , (text "requirements:", [rowTabWith (toDoc "") $ ynvReqs cp]) -- TODO
+    , (text "code:", [codeBlock $ ynvCode cp])
+    ]
+    where
+      portList (n,p)  = simpleTable [] [[plain $ ibold n <> strong ": ",  toDoc "" p]]
+
+-----------------------------------------------------------
+
+data YBind = YPort  Id
+           | YIter  Id
+           | YParam YNode
+           deriving (Show, Generic)
+instance Binary YBind
+
+getBindName (YPort id) = id
+getBindName (YIter id) = id
+getBindName (YParam _) = "_internal_"
+
+data YRef = YRef { yrefId     :: Id
+                 , yrefInline :: Bool
+                 , yrefBinds  :: Map YBind
+                 } deriving (Show, Generic)
+instance Binary YRef
+
+instance FromYAML YRef where
+  parseYAML = withMap "Reference" $ \r -> do
+    from <- r .: "component"
+    inln <- r .:? "inline" .!= False
+    bind <- r .:? "bindings" >>=? parseMap "replace" "Binding list" .!= emptyMap
+    return $ YRef from inln bind
+
+instance FromYAML YBind where
+  parseYAML r = withMap "Binding"
+    (\b -> do
+        port <- b .:? "with"
+        val  <- b .:? "withValue"
+        iter <- b .:? "withIterator"
+        case (port, val, iter) of
+          (Just with, Nothing, Nothing) -> return $ YPort with
+          (Nothing, Just with, Nothing) -> return $ YParam with
+          (Nothing, Nothing, Just with) -> return $ YIter with
+          _ -> failAtNode r "Binding not valid"
+    ) r
+-----------------------------------------------------------
+
+parseMap :: FromYAML v => Text -> String -> YNode -> Parser (Map v)     
+parseMap name desc = withSeq desc (fmap mkMap . mapM mkPair)
+  where mkPair a = (,) <$> getId a <*> parseYAML a
+        getId  = withMap ("Node with "++ unpack name ++" attribute") $ \r -> r .: name
+
+infixl 9 >>=?
+(>>=?) :: Monad m => m (Maybe a) -> (a -> m b) -> m (Maybe b) 
+a >>=? b = a >>= maybe (return Nothing) (fmap Just . b)
+
+formattedBinds :: Map YRef -> Map [(Blocks,YBind)]
+formattedBinds = groupAll . map format . foldr flatten [] . idEntries
+  where
+    flatten (pl, YRef id il bs) flist =
+      map (\(rpl,wt) -> (getBindName wt, (wt,id,rpl,il,pl))) (idEntries bs) ++ flist
+    format (n,(wt,id,rpl,il,pl)) =
+      let formInline i = if i then ibold "!" else text ""
+          formBind (YPort _)  = text
+          formBind (YIter _)  = ibracks . text
+          formBind (YParam _) = iangles . text
+      in (n, ( plain $ formInline il <> iparens (code pl) <>  math "\\rightarrow"
+               <> ilink "cp" id <> text ":" <> formBind wt rpl
+             , wt))
+    groupAll xs = mkMapWith (++) [ (k, [v]) | (k, v) <- xs ]
+
+-----------------------------------------------------------
+
+instance Binary Pos
+instance Binary Scalar
+instance Binary Tag
+instance Binary (Node Pos)
+
+instance ToDoc (Node Pos) where
+  toDoc _ = codeBlock . toStrict . decodeUtf8 . encode1

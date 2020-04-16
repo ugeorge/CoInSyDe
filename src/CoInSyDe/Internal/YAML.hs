@@ -1,36 +1,32 @@
 {-# LANGUAGE FlexibleInstances #-}
 module CoInSyDe.Internal.YAML where
 
-import           Control.DeepSeq
-import           Control.Monad (liftM, filterM)
+import           Control.Monad (liftM)
 import qualified Data.ByteString.Lazy as BL
-import           Data.ByteString.Lazy.Internal (packChars)
-import qualified Data.Text as T
+import           Data.Text (Text)
 import           Data.YAML
 import           System.Exit
 
 -- | Convenience wrapper for a Yaml document, for nicely printing out
 -- parser errors.
-data YamlDoc = YamlDoc { yamlPath :: FilePath
-                       , yamlText :: BL.ByteString
-                       , yamlRoot :: YamlNode
-                       }
+data YDoc = YDoc { yamlPath :: FilePath
+                 , yamlText :: BL.ByteString
+                 , yamlRoot :: YNode
+                 }
 
-type YamlNode = Node Pos
-
--- getters -----------------
+type YNode = Node Pos
 
 -- | Gets the position info of a node.
-getPos :: YamlNode -> Parser Pos
+getPos :: YNode -> Parser Pos
 getPos (Scalar loc _) = return loc
 getPos (Mapping loc _ _) = return loc
 getPos (Sequence loc _ _) = return loc
 getPos (Anchor loc _ _) = return loc 
 
 -- | Returns children /nodes/ without attributes.
-getChildren :: String -> YamlNode -> Parser [YamlNode]
+getChildren :: Text -> YNode -> Parser [YNode]
 getChildren str = withMap "parent node" $ \ o -> do
-  ret <- o .:? T.pack str
+  ret <- o .:? str
   case ret of
     Just m@Mapping{}      -> return [m]
     Just (Sequence _ _ l) -> return $ filter isMap l
@@ -39,71 +35,42 @@ getChildren str = withMap "parent node" $ \ o -> do
   where isMap Mapping{} = True
         isMap _ = False
 
--- | Infix operator for 'getChildren'.
-(|=) :: YamlNode -> String -> Parser [YamlNode]
-node |= name = getChildren name node
-
-(@!) :: FromYAML v => YamlNode -> String -> Parser v
-node @! attr = withMap "parent node" (\n -> n .: T.pack attr) node
-
-(@?) :: FromYAML v => YamlNode -> String -> Parser (Maybe v)
-node @? attr = withMap "parent node" (\n -> n .:? T.pack attr) node
-
--- | Same as 'getChildren', but looks for several node names instead of just one.
-childrenOf :: [String] -> YamlNode -> Parser [YamlNode]
-childrenOf names node = concat <$> mapM (`getChildren` node) names
-
--- | Returns the text of an attribute. If it does not exist, then it
--- returns n empty string.
-getText :: String -> YamlNode -> Parser T.Text
-getText str = withMap "parent node" $ \o -> do
-  ret <- o .:? T.pack str
-  case ret of
-    Just (Scalar _ (SStr t)) -> return t
-    Just n                   -> typeMismatch "does not contain text info!" n
-    Nothing                  -> return (T.pack "")
-
--- | Predicate function for testing if an atribute exists and has a certain value.
-hasValue :: String -> String -> YamlNode -> Parser Bool
-hasValue attr val node = liftM (\v -> T.pack val == v) (getText attr node) 
-  
--- | Filters a list of node based on a 'hasValue' predicate.
-filterByAttr :: String -> String -> [YamlNode] -> Parser [YamlNode]
-filterByAttr attr val = filterM (attr `hasValue` val) 
-
-
 -- file methods --------------------------
 
-readYAML :: FilePath -> IO YamlDoc
-readYAML p = BL.readFile p >>= \s ->
-  either (die . inStyle p s) (return . YamlDoc p s . getRoot . head) (decodeNode s)
+readYDoc :: FilePath -> IO YDoc
+readYDoc p = BL.readFile p >>= \s ->
+  either (die . inStyle p s) (return . YDoc p s . getRoot . head) (decodeNode s)
   where getRoot r = case docRoot r of
           r@Mapping{} -> r
-          _ -> error $ " YAML parse error in file\n\t+++ " ++ p
+          _ -> error $ " Parse error in file\n++++ " ++ p
                     ++ "\nDocument is not a dictionary."
         inStyle path inp (pos,msg) = prettyPosWithSource pos inp
           (" YAML parse error in file\n\t+++ " ++ path ++ "\n" ) ++ msg ++ "\n"
 
-withYAML :: FilePath -> (YamlDoc -> a) -> IO a
-withYAML path f = liftM f (readYAML path)
+withYDoc :: FilePath -> (YDoc -> a) -> IO a
+withYDoc path f = liftM f (readYDoc path)
+
+parseYDoc :: YDoc -> Parser a -> IO a
+parseYDoc doc = either (die . prettyErr doc) return  . parseEither
 
 writeYAML :: ToYAML v => FilePath -> v -> IO ()
 writeYAML path = BL.writeFile path . encode1
 
 -- | Pretty-prints a parser error
-prettyErr :: YamlDoc -> (Pos,String) -> String
-prettyErr (YamlDoc f s _) (pos,msg) = prettyPosWithSource pos s
-  (" YAML parse error in file\n\t+++ " ++ f ++ "\n" ) ++ msg ++ "\n"
+prettyErr :: YDoc -> (Pos,String) -> String
+prettyErr (YDoc f s _) (pos,msg) = prettyPosWithSource pos s
+  (" Parse error in file\n++++ " ++ f ++ "" ) ++ msg ++ "\n"
 
-instance Read (Node Pos) where
-  readsPrec p str = [ (makeNode x, y) | (x, y) <- readsPrec p str ]
-    where makeNode = either (error . show) id . decode1 . packChars
+-- instance Read (Node Pos) where
+--   readsPrec p str = [ (makeNode x, y) | (x, y) <- readsPrec p str ]
+--     where makeNode = either (error . show) id . decode1 . packChars
 
-instance NFData (Node Pos) where
-  rnf (Scalar l s)     = rnf l `seq` rnf s
-  rnf (Mapping l _ m)  = rnf l `seq` rnf m
-  rnf (Sequence l _ s) = rnf l `seq` rnf s
-  rnf (Anchor l _ a)   = rnf l `seq` rnf a
+-- instance NFData (Node Pos) where
+--   rnf (Scalar l s)     = rnf l `seq` rnf s
+--   rnf (Mapping l _ m)  = rnf l `seq` rnf m
+--   rnf (Sequence l _ s) = rnf l `seq` rnf s
+--   rnf (Anchor l _ a)   = rnf l `seq` rnf a
+
 
 --- TODO: make Node an instance of Ginger.GVal, e.g.
 -- -- | Convert Aeson 'Value's to 'GVal's over an arbitrary host monad. Because

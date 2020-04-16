@@ -1,6 +1,0 @@
-name: test
-
-projects:
-- name: test1
-  target: c.sem
-  srcFile: testfile/hallo.yml
