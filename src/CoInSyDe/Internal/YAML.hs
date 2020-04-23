@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleInstances, OverloadedStrings #-}
 module CoInSyDe.Internal.YAML where
 
-import           Control.Monad (liftM)
+import           Control.Monad (liftM,when)
 import qualified Data.ByteString.Lazy as S
 import           Data.Maybe
 import           Data.Text (Text)
@@ -14,11 +14,13 @@ import           System.Exit
 -- parser errors.
 data YDoc = YDoc { yamlPath :: FilePath
                  , yamlText :: S.ByteString
-                 , yamlMeta :: YNode
+                 , yamlMeta :: Maybe YNode
                  , yamlRoot :: YNode
                  }
 
 type YNode = Node Pos
+
+type YPos = Pos
 
 -- | Gets the position info of a node.
 getPos :: YNode -> Parser Pos
@@ -47,33 +49,47 @@ queryNode l n = query' l n >>= maybe (return Nothing) parseYAML
       Mapping{} -> withMap "" (.:? q) n >>= maybe (return Nothing) (queryNode qs)
       _         -> return Nothing
 
+forMap s n f = withMap s f n
+forSeq s n f = withSeq s f n
+
+getTextPos (Scalar p _) = p
+getTextPos a = error "Not a text node!" 
+
+parseMapWith :: FromYAML v => String -> String
+             -> (Mapping Pos -> Parser v) -> YNode -> Parser [v]
+parseMapWith name desc f = withSeq desc (mapM (withMap name f))
+
+infixl 9 >>=?
+(>>=?) :: Monad m => m (Maybe a) -> (a -> m b) -> m (Maybe b) 
+a >>=? b = a >>= maybe (return Nothing) (fmap Just . b)
+
 -- file methods --------------------------
 
-handleMeta :: FilePath -> S.ByteString -> IO (S.ByteString,YNode)
+handleMeta :: FilePath -> S.ByteString -> IO (S.ByteString,Maybe YNode)
 handleMeta p bs = do
   let newline   = toEnum $ fromEnum '\n' :: Word8
       space     = toEnum $ fromEnum ' '  :: Word8
       (lsm,lsc) = span (S.isPrefixOf "--") $ S.split newline bs
       metaStr   = S.intercalate "\n" $ map (fromJust . S.stripPrefix "--") lsm
-  meta <- either (die . inStyle p metaStr) (return . getRoot . head)
-          $ decodeNode metaStr
-  let fromMeta f = parseEither (f meta)
-      getPrefix  = queryNode ["literate", "prefix"]  
-      getOffset  = queryNode ["literate", "offset"]  
-  pref <- either (die . inStyle p metaStr) return (fromMeta getPrefix) :: IO (Maybe Text)
-  offs <- either (die . inStyle p metaStr) return (fromMeta getOffset) 
-  let offset = fromMaybe 10 offs
-      content = S.intercalate "\n" $ case fmap (S.fromStrict . encodeUtf8) pref of
-        Nothing -> lsc
-        Just pr -> let alignCode l = S.replicate offset space `S.append` l
-                   in  map (\l -> fromMaybe (alignCode l) (S.stripPrefix pr l)) lsc
-  return (content, meta)
-  where
-    getRoot r = case docRoot r of
-      r@Mapping{} -> r
-      _ -> error $ " Error parsing metadata in file \n++++ " ++ p
-    inStyle path inp (pos,msg) = prettyPosWithSource pos inp
-      (" YAML error in metadata for\n\t+++ " ++ path ++ "\n" ) ++ msg ++ "\n"
+  if S.null metaStr then return (bs,Nothing)
+    else do
+    meta <- either (die . inStyle p metaStr) (return . getRoot . head)
+            $ decodeNode metaStr
+    let fromMeta f = either (die . inStyle p metaStr) return $ parseEither (f meta)  
+    pref <- fromMeta (queryNode ["literate", "prefix"]) :: IO (Maybe Text)
+    offs <- fromMeta (queryNode ["literate", "offset"])
+    let offset = fromMaybe 10 offs
+        content = S.intercalate "\n" $ case fmap (S.fromStrict . encodeUtf8) pref of
+          Nothing -> lsc
+          Just pr -> let alignCode l = S.replicate offset space `S.append` l
+                     in  map (\l -> fromMaybe (alignCode l) (S.stripPrefix pr l)) lsc
+    return (content, Just meta)
+      where
+        getRoot r = case docRoot r of
+          r@Mapping{} -> r
+          _ -> error $ " Error parsing metadata in file \n++++ " ++ p
+        inStyle path inp (pos,msg) = prettyPosWithSource pos inp
+          (" YAML error in metadata for\n\t+++ " ++ path ++ "\n" ) ++ msg ++ "\n"
 
 readYDoc :: FilePath -> IO YDoc
 readYDoc p = S.readFile p >>= handleMeta p >>= \(s,m) ->

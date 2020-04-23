@@ -14,13 +14,15 @@
 ----------------------------------------------------------------------
 module CoInSyDe.Internal.Map (
   -- * CoInSyDe 'Map' Type
-  Id, Map(..), mkMap, mkMapWith, ids, entries, idEntries, (!?), (!?!),
+  Id, Map(..), mkMap, mkMapWith,
+  isEmpty, ids, entries, idEntries,
+  insertWith, (!?), (!?!),
   -- * Re-wrapped utilities
   emptyMap, liftMap, liftMap2,
   -- * History-Bookkeeping Map
   MapH, Info(..), Policy(..), prettyInfo,
-  mkDict, (!*), (!^),
-  dictUpdate, dictTransfer
+  mkDict, (!*), (!^), mapDict, 
+  dictUpdate, dictTransfer, dictUnion
   ) where
 
 import           Data.Maybe (fromMaybe)
@@ -48,6 +50,10 @@ instance Functor Map where
 instance Foldable Map where
   foldr f i = M.foldr f i . getMap
 
+instance Traversable Map where
+  traverse f x = Map <$> traverse f (getMap x)
+
+
 instance Binary v => Binary (Map v) where
   put = put . M.toList . getMap
   get = (Map . M.fromList) <$> get
@@ -61,9 +67,12 @@ emptyMap  = Map M.empty
 liftMap f = Map . f . getMap
 liftMap2 f (Map a) (Map b) = Map (f a b)
 
+isEmpty = M.null . getMap
 ids = M.keys . getMap
 entries = M.elems . getMap
 idEntries = M.toList . getMap
+
+insertWith f k v = liftMap (M.insertWith f k v)
 
 -- | Genric 'Map' selector. Throws a more meaningful error message than the default
 -- one.
@@ -88,6 +97,7 @@ prettyInfo (Info f l c)  = f ++ " (" ++ show l ++ ":" ++ show c ++ ")"
 
 -- | Dictionary associating an 'Id' with an entry (e.g. component), along with its
 -- load history (newest to oldest).
+
 type MapH t = Map (t,[Info])
 
 -- | Dictionary entry insertion policy
@@ -106,6 +116,8 @@ infixl 9 !*, !^, !?!
 -- | Makes a 'MapH' from a list of entries with their history.
 mkDict :: [(Id, t, [Info])] -> MapH t
 mkDict = Map . M.fromList . map (\(i,c,h) -> (i,(c,h)))
+
+mapDict f = fmap (\(e,i) -> (f e, i))
    
 -- | Inserts an entry into a 'MapH'. Depending on the 'Policy', if the entry exists:
 --
@@ -123,9 +135,16 @@ fKeep    (_,newh) (a,oldh) = (a,oldh++newh)
 dictTransfer :: Show t => Id -> MapH t -> MapH t -> MapH t
 dictTransfer name src = liftMap (M.insertWith (\_ a -> a) name (src !?! name))
 
+dictUnion :: MapH t -> MapH t -> MapH t
+dictUnion = liftMap2 (M.unionWithKey err)
+  where
+    err k (_,i1) (_,i2) = error $ "Found two components with the same ID " ++ show k
+                          ++ " defined at:\n+++ " ++ prettyInfo (head i1)
+                          ++ "\n+++ " ++ prettyInfo (head i2)
+
 dictErr k d = "ID " ++ show k ++ " does not exist in the database with elements: "
-              -- ++ (show $ ids d)
-              ++ (TL.unpack $ pShow d)
+              ++ (show $ ids d)
+              -- ++ (TL.unpack $ pShow d)
 
 instance ToDoc l => ToDoc (MapH l) where
   toDoc pref = definitionList . map makedefs . idEntries

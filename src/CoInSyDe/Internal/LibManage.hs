@@ -95,8 +95,8 @@ buildLoadLists suite proj = withCurrentDirectory (workspaceRoot suite) $ do
   tyPaths <- saneCheck target "type"     <$> mapM listDirectory (typePaths suite)
   nvPaths <- saneCheck target "native"   <$> mapM listDirectory (nativePaths suite)
   tpPaths <- saneCheck target "template" <$> mapM listDirectory (templatePaths suite)
-  return [ ("type",     tyPaths ++ projTypes proj)
-         , ("native",   reverse $ projNative proj ++ nvPaths)
+  return [ ("type",     reverse $ tyPaths ++ projTypes proj)
+         , ("native",   reverse $ nvPaths ++ projNative proj)
          , ("template", reverse tpPaths)
          , ("pattern",  reverse $ projPatts proj)]
 
@@ -150,15 +150,10 @@ loadLibs what = foldM loadLib emptyMap
     makeLib lib doc  = foldM load lib =<< getChildren (pack what) (yamlRoot doc)
       where
         load lib node = do
-          let policy = case (pack what) of
-                         "type"     -> Replace
-                         "pattern"  -> Keep
-                         "template" -> Keep
-                         "native"   -> Keep
           info  <- mkInfo doc node
           name  <- withMap ("Input document for '" ++ what ++ "'") (.: "name") node
           entry <- parseYAML node
-          return $ dictUpdate policy name entry info lib 
+          return $ dictUpdate Keep name entry info lib 
 
 -- | Gets parser information about a node
 mkInfo :: YDoc -> YNode -> Parser Info

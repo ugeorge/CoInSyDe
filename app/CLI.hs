@@ -15,6 +15,11 @@ import System.IO
 import Data.Time.Clock (getCurrentTime)
 
 
+import Data.YAML (FromYAML)
+import Data.Binary (Binary)
+import Data.Proxy (Proxy)
+
+
 -- import Control.Exception
 import Control.Monad
 import Data.Maybe
@@ -24,6 +29,7 @@ import Text.Pretty.Simple
 -- import Data.Text.Prettyprint.Doc
 -- import Data.Text.Prettyprint.Doc.Render.Text
 
+import CoInSyDe.Target
 import CoInSyDe.Frontend
 import CoInSyDe.Internal.Config
 import CoInSyDe.Internal.Docs
@@ -50,6 +56,8 @@ main = do
   when debug $ pPrint gconf
   when debug $ pPrint pconfs
 
+  setCurrentDirectory root
+  
   -- select the user-demand projects
   let projConfigs = if null projs then pconfs
                     else filter (\p -> projName p `elem` projs) pconfs
@@ -63,36 +71,39 @@ main = do
     libPaths@[tys,nvs,tms,pts] <- buildLoadLists gconf conf
     when debug $ pPrint libPaths
 
-    -- TODO: select target language, hence the internal types
-    -- CoInSyDe.Target.getTargetProxy (projTarget conf)
-    
-    -- load the libraries
-            
-    -- tyLib <- load tys :: IO ([YNode])
-    -- when debug $ dbgPrettyLib conf (fst tys) tyLib
+    case (head $ projTarget conf) of
+      "c" -> do
+        let (tyProxy,nvProxy,tmProxy,ptProxy) = getCProxies
+        tyLib <- loadLibraryObj cliconf gconf conf tyProxy tys
+        when debug $ dbgPrettyLib conf (fst nvs) tyLib
+        
+        nvLib <- loadLibraryObj cliconf gconf conf nvProxy nvs
+        when debug $ dbgPrettyLib conf (fst nvs) nvLib
+        
+        tmLib <- loadLibraryObj cliconf gconf conf tmProxy tms
+        when debug $ dbgPrettyLib conf (fst nvs) tmLib
+        
+        ptLib <- loadLibraryObj cliconf gconf conf ptProxy pts
+        when debug $ dbgPrettyLib conf (fst pts) ptLib
 
-    nvLib <- loadLibraryObj cliconf gconf conf () nvs :: IO (MapH (YNv YNode YNode))
-    when debug $ dbgPrettyLib conf (fst nvs) nvLib
+        unless (isNothing $ docs cliconf) $ dumpLibraryDoc cliconf gconf conf
+          [ ("Types",               toDoc "cp" tyLib)
+          , ("Patterns",            toDoc "cp" ptLib)
+          , ("Native Components",   toDoc "cp" nvLib)
+          , ("Template Components", toDoc "cp" tmLib) ]
 
-    tmLib <- loadLibraryObj cliconf gconf conf () tms :: IO (MapH (YTm YNode YNode))
-    when debug $ dbgPrettyLib conf (fst nvs) tmLib
-    
-    ptLib <- loadLibraryObj cliconf gconf conf () pts :: IO (MapH (YPt YNode YNode))
-    when debug $ dbgPrettyLib conf (fst pts) ptLib
+        let compDb = (mapDict PtComp ptLib) `dictUnion` (mapDict TmComp tmLib)
+                     `dictUnion` (mapDict NvComp nvLib)
 
-    unless (isNothing $ docs cliconf) $ dumpLibraryDoc cliconf gconf conf
-      [ ("Patterns", toDoc "cp" ptLib)
-      , ("Native Components", toDoc "cp" nvLib)
-      , ("Template Components", toDoc "cp" tmLib) ]
-  
-  print projConfigs
+        putStrLn "hallo"
 
--- TODO: use proxy
--- loadLibraryObj :: (FromYAML a, Binary a)
---                => ProjConfig -> ()
---                -> (String,[FilePath]) -> IO (MapH a)
-loadLibraryObj cliconf gconf conf proxy (what,paths) 
-  = withCurrentDirectory (workspaceRoot gconf) $ do
+      other -> putStrLn $ "[WARNING] CoInSyDe does not support target family "
+               ++ show other ++ ". Ignoring project " ++ show (projName conf) ++ "!"
+
+loadLibraryObj :: (FromYAML a, Binary a)
+               => CLIConfig -> SuiteConfig -> ProjConfig -> Proxy a
+               -> (String,[FilePath]) -> IO (MapH a)
+loadLibraryObj cliconf gconf conf proxy (what,paths) = do
   reload <- shouldReloadLib conf what paths
   if reload || force cliconf
     then do lib <- loadLibs what paths
@@ -100,10 +111,9 @@ loadLibraryObj cliconf gconf conf proxy (what,paths)
             return lib
     else loadObj conf what
 
--- dumpLibraryDoc :: SuiteConfig -> ProjConfig -> Maybe String
+-- dumpLibraryDoc :: CliConfig -> SuiteConfig -> ProjConfig -> Maybe String
 --                -> [(String, Blocks)] -> IO ()
-dumpLibraryDoc cliconf gconf conf content
-  = withCurrentDirectory (workspaceRoot gconf) $ do
+dumpLibraryDoc cliconf gconf conf content = do
   createDirectoryIfMissing True (projDocs conf)
   time <- getCurrentTime
   let format   = fromJust $ docs cliconf
@@ -115,8 +125,8 @@ dumpLibraryDoc cliconf gconf conf content
                  (coinsydeVersion gconf) (workspaceRoot gconf) content
   writePandocJson jsonFile pandoc
   _ <- createProcess (proc "pandoc" $
-                       ["--from=json", "--to=" ++ format, "--table-of-contents"
-                       , "--output=" ++ docFile] ++ otherOpt ++ [jsonFile])
+                       otherOpt ++ ["--toc", "--from=json", "--to=" ++ format,
+                                    "--output=" ++ docFile] ++ [jsonFile])
   return ()
        
   
@@ -227,7 +237,7 @@ flags =
     "Forces parsing libraries even if they can be loaded from dumped objects"
   , Option ['D'] ["docs"] (OptArg (Docs . fromMaybe "") "FORMAT")
     "Dumps the documentation for current project in given format. Default is html."
-  , Option [] ["pandoc-opt"] (OptArg (Docs . fromMaybe "") "OPT")
+  , Option [] ["pandoc-opt"] (OptArg (DocOpt . fromMaybe "") "OPT")
     "Dumps the documentation for current project in given format. Default is html."
   ]
 header = "Usage: f2c [options] [projects]"
@@ -248,7 +258,7 @@ parse argv =
       when (Init `elem` args) $ do
         makeDefaultConfig
         exitSuccess
-      return $ (debug, CLIConfig force docs docopt, projs)
+      return (debug, CLIConfig force docs docopt, projs)
     (_,_,errs) -> do
       hPutStrLn stderr (concat errs ++ usageInfo header flags)
       exitWith (ExitFailure 1)
