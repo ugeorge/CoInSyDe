@@ -39,6 +39,8 @@ packages:
 # (e.g., acme-missiles-0.3)
 extra-deps:
 - pretty-simple-3.1.0.0
+- HsYAML-0.2.1.0
+- pandoc-types-1.20
 
 # Override default flag values for local packages and extra-deps
 # flags: {}

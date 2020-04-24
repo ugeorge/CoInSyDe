@@ -1,5 +1,5 @@
 name:                coinsyde
-version:             0.2.0.0
+version:             0.2.1.0
 github:              "githubuser/coinsyde"
 license:             BSD3
 author:              "Author name here"
@@ -27,29 +27,28 @@ description:         Please see the README on GitHub at <https://github.com/gith
 
 dependencies:
 - base >= 4.7 && < 5
-- xml
+# data types
+- aeson #! needed for pandoc-types
+- pandoc-types
+- HsYAML
 - text
-- unordered-containers
-- ginger
-- pretty-simple >= 3
-- filepath
-- bytestring >= 0.10
-- directory >= 1.2
-- scientific
-# - binary
-- deepseq
-- aeson
-- yaml
-- vector
-- data-default
-- mtl
+- binary
 - hashable
+- unordered-containers
+# - vector #!
+# - scientific #!
+# control
+- ginger
+# - data-default #!
+# - deepseq #!
+- mtl
+# IO
+- time
+- filepath
+- directory >= 1.2
+- bytestring >= 0.10
 - prettyprinter
-# when:
-# - condition: flag(dynamic)
-#   dependencies:
-#   - ghc
-#   - ghc-lib
+- pretty-simple >= 3
 
 
 
@@ -57,11 +56,11 @@ library:
   source-dirs: src
   
 executables:
-  f2c:
-    main:                F2C.hs
+  coinsyde:
+    main:                CLI.hs
     source-dirs:         app
     ghc-options:
-    - -main-is           F2C
+    - -main-is           CLI
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
