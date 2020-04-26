@@ -1,6 +1,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE StandaloneDeriving, DeriveGeneric #-}
 {-# LANGUAGE TypeFamilies, FlexibleContexts, OverloadedStrings #-}
+{-# LANGUAGE FlexibleInstances, TypeSynonymInstances #-}
 ----------------------------------------------------------------------
 -- |
 -- Module      :  CoInSyDe.Core
@@ -19,7 +20,7 @@ module CoInSyDe.Core (
   Id, Map, MapH, IfMap, InstMap,
   mkMap, ids, entries, (!?!),
   -- * Core Types
-  Target(..), Comp(..), Instance(..),
+  Target(..), Comp(..), If(..), Instance(..),
   -- * Core Type Constructors
   mkNative, mkTemplate, mkPattern,
   ) where
@@ -27,7 +28,11 @@ module CoInSyDe.Core (
 import Control.Monad (when)
 import Data.Binary
 import Data.Maybe
-import Data.Text as T (Text,breakOn)
+import Data.Text as T (Text,append,pack)
+import Data.Text.Lazy (toStrict)
+import Data.Text.Lazy.Encoding (decodeUtf8)
+import Data.YAML (encode1)
+import GHC.Generics
 import Text.Pandoc.Builder hiding (Target)
 
 import CoInSyDe.Internal.Map
@@ -36,8 +41,8 @@ import CoInSyDe.Internal.Docs
 
 ------------- ALIASES -------------
 
-type IfMap l   = Map (If l)
-type InstMap l = Map (Instance l)
+type IfMap l = Map (If l)
+type InstMap = Map Instance
 
 ------------- CORE TYPES -------------
 
@@ -67,7 +72,7 @@ data Comp l where
     { cpName  :: Id          -- ^ unique component ID
     , cpIfs   :: IfMap l     -- ^ maps template hooks to target-relevant ifs
     , cpReqs  :: [Requ l]    -- ^ special requirements for component
-    , cpRefs  :: InstMap l   -- ^ maps a (template) function placeholder to
+    , cpRefs  :: InstMap     -- ^ maps a (template) function placeholder to
                  -- an existing component, with new bindings
     , cpTpl   :: (YPos,Text) -- ^ template code
     } -> Comp l
@@ -86,14 +91,15 @@ data If l where
   TPort :: Target l => { ifPort :: Port l } -> If l
 deriving instance Target l => Show (If l)
 
+-- type Query = Id
+
 -- | Container used for storing a reference to a functional component. 
-data Instance l where
-  Ref :: (Target l) =>
-    { refId     :: Id      -- ^ functional component ID
-    , retInline :: Bool    -- ^ True if expanded inline, False if abstracted away
-    , refBinds  :: IfMap l -- ^ bindings between parent and component ifs
-    } -> Instance l
-deriving instance Target l => Show (Instance l)
+data Instance =
+  Ref { refId     :: Id     -- ^ functional component ID
+      , retInline :: Bool   -- ^ True if expanded inline
+      , refBinds  :: Map Id -- ^ bindings between parent and component
+      } deriving (Show, Generic)
+instance Binary Instance
 
 ------------- EXIFED DICTIONARY BUILDERS -------------
 
@@ -130,7 +136,7 @@ mkTemplate :: Target l
 mkTemplate typeLib n = do
   name   <- n @! "name"
   requs  <- n |= "requirement" >>= mapM mkRequ 
-  ports  <- n |= "port"        >>= mkPortDict typeLib
+  ports  <- n |= "port"        >>= mkParamDict
   params <- n |= "parameter"   >>= mkParamDict
   templ  <- n @! "code"
   tmpos  <- n @^ "code"
@@ -145,14 +151,14 @@ mkPattern :: Target l
           -> YMap            -- ^ @\<root\>@ node
           -> YParse (Comp l) -- ^ updated library of components
 mkPattern tyLib cpLib n = do
-  name   <- n @! "name"
-  kind   <- (cpLib !*) <$> (n @! "type") >>=
-            maybe (yamlError n "Template type not loaded!") return
-  requs  <- n |= "requirement" >>= mapM mkRequ 
-  ports  <- n |= "port"        >>= mkPortDict tyLib
-  params <- n |= "parameter"   >>= mkParamDict
-  binds  <- n |= "instance"    >>= mkInstDict (ports `union` params)
-  return $ TmComp name (ports `union` params) requs emptyMap (cpTpl kind)
+  name      <- n @! "name"
+  kind      <- (cpLib !*) <$> (n @! "type") >>=
+               maybe (yamlError n "Template type not loaded!") return
+  requs     <- n |= "requirement" >>= mapM mkRequ 
+  ports     <- n |= "port"        >>= mkPortDict tyLib
+  params    <- n |= "parameter"   >>= mkParamDict
+  (b,extra) <- n |= "instance"    >>= mkInstDict (ports `union` params)
+  return $ TmComp name (ports `union` params `union` extra) requs b (cpTpl kind)
                        
 ------------- INTERNAL DICTIONARY BUILDERS -------------
 
@@ -160,10 +166,8 @@ mkPortDict :: Target l => MapH (Type l) -> [YMap] -> YParse (IfMap l)
 mkPortDict tyLib = fmap mkMap . mapM load
   where load p = do
           name <- p @! "name" 
-          let pname = case breakOn "." name of (n,"") -> n
-                                               (_,n)  -> n
           port <- mkPort tyLib p
-          return (pname, TPort port)
+          return (name, TPort port)
 
 mkParamDict :: Target l => [YMap] -> YParse (IfMap l)
 mkParamDict = fmap mkMap . mapM load
@@ -172,28 +176,32 @@ mkParamDict = fmap mkMap . mapM load
           val  <- p @! "value"
           return (name, Param val)
 
-mkInstDict :: Target l => IfMap l -> [YMap] -> YParse (InstMap l)
-mkInstDict parentIfs = fmap mkMap . mapM load
-  where  load n = do
-           to   <- n @! "placeholder"
-           from <- n @! "component"
-           inln <- n @? "inline" @= False
-           bind <- n |= "bind" >>= mkBindDict parentIfs
-           return (to, Ref from inln bind)
+mkInstDict :: Target l => IfMap l -> [YMap] -> YParse (InstMap, IfMap l)
+mkInstDict parentIfs = fmap (break . unzip) . mapM load 
+  where break (a,b) = (mkMap a, mkMap $ concat b)
+        load n = do
+          to     <- n @! "placeholder"
+          from   <- n @! "component"
+          inln   <- n @? "inline" @= False
+          (b,ex) <- n |= "bind" >>= mkBindDict to parentIfs
+          return $ ((to, Ref from inln b), ex)
 
-mkBindDict :: Target l => IfMap l -> [YMap] -> YParse (IfMap l)
-mkBindDict parentIfs = fmap mkMap . mapM load 
-  where load n = do
+mkBindDict :: Target l => Text -> IfMap l -> [YMap] -> YParse (Map Id, [(Id, If l)])
+mkBindDict place pIfs = fmap (break . unzip) . mapM load . zip [0..]
+  where break (a,b) = (mkMap a, concat b)
+        load (ix,n) = do
           repl  <- n @! "replace"
           with  <- n @? "with"
-          withv <- n @? "withVal"
+          withv <- n @? "withParam"
           case (with ,withv) of
             (Just with, Nothing) -> do
-              bIf <- maybe (yamlError n $ "If "++ show with ++" does not exist!")
-                       return (parentIfs !? with)
-              return (repl, bIf)
-            (Nothing, Just with) -> return (repl, Param with) 
-            _ -> yamlError n $ "<bind> node malformed: " ++ show n
+              _ <- maybe (yamlError n $ "Port or parameter does not exist!")
+                   return (pIfs !? with)
+              return ((repl, with),[])
+            (Nothing, Just with) -> do
+              let newRef = "__" `append` place `append` pack (show ix)
+              return ((repl, newRef), [(newRef, Param with)]) 
+            _ -> yamlError n "Binding node malformed!"
 
 
 ------------- OTHER INSTANCES -------------
@@ -209,49 +217,63 @@ instance  Target l => Binary (Comp l) where
              1 -> NvComp <$> get <*> get <*> get <*> get
 
 
-instance Target l => Binary (Instance l) where
-  put (Ref n i b) = do put (0 :: Word8)
-                       put n >> put i >> put b
-  get = do tag <- getWord8
-           case tag of
-             0 -> Ref <$> get <*> get <*> get
-
 instance Target l => Binary (If l) where
   put (Param v) = put (0 :: Word8) >> put v
-  put (TPort p)   = put (1 :: Word8) >>  put p
+  put (TPort p) = put (1 :: Word8) >>  put p
   get = getWord8 >>= \tag -> case tag of
                                0 -> Param <$> get
                                1 -> TPort <$> get
 
+-- monster code for Pandoc "pretty documentation"
+
 instance Target l => ToDoc (Comp l) where
   toDoc _ cp@TmComp{} = definitionList
-    [ (text "interfaces:",       map ifList $ idEntries $ cpIfs cp)
-    , (text "extra parameters:", map rowTab unameBRows)
-    , (text "requirements:",     map (toDoc "") cpReqs cp) 
-    , (text "template code:",    [codeBlock $ snd $ ytmTpl cp])
-    ]
+    [ (text "interfaces:",    map ifList $ idEntries $ cpIfs cp)
+    , (text "requirements:",  map (toDoc "") $ cpReqs cp) 
+    , (text "template code:", [codeBlock $ snd $ cpTpl cp]) ]
     where
       ifList (n,p) = rowTab
         [ simpleTable [] [[plain $ ibold n <> strong ": ",  toDoc "" p]]
         , bulletList (nameBRows n) ]
-      fbinds      = formattedBinds (yptRefs cp)
-      nameBRows n = maybe [] (map fst) $ fbinds !? n
-      unameBRows  = maybe [] (map (\(bl, Param x) -> [toDoc "" x, bl]))
-                    $ fbinds !? "_internal_"
+      fbinds      = formattedBinds (cpRefs cp)
+      nameBRows n = maybe [] id $ fbinds !? n
+  toDoc _ cp@NvComp{} = definitionList
+    [ (text "interfaces:",    map ifList $ idEntries $ cpIfs cp)
+    , (text "requirements:",  map (toDoc "") $ cpReqs cp) 
+    , (text "native code:", [codeBlock $ fromMaybe "" $ cpCode cp]) ]
+    where
+      ifList (n,p) = simpleTable [] [[plain $ ibold n <> strong ": ",  toDoc "" p]]
+        
+instance Target l => ToDoc (If l) where
+  toDoc _ (Param p) = toDoc "" p
+  toDoc _ (TPort p) = toDoc "" p
 
-formattedBinds :: Target l => InstMap l -> Map [(Blocks,If l)]
+instance ToDoc YNode where
+  toDoc _ = codeBlock . toStrict . decodeUtf8 . encode1    
+
+instance ToDoc l => ToDoc (MapH l) where
+  toDoc pref = definitionList . map makedefs . idEntries
+    where 
+      makedefs (n,(e,i))
+        = (ibold n, [codeBlock (comment $ head i)] ++ 
+                    [divWith (pref `T.append` n,[pack "def",pref],[]) $ toDoc pref e]
+                    ++ [showLoad i]  ++ showOverride i ++ [horizontalRule])
+      showLoad i = plain $ (text $ pack "Loaded from: ")
+                   <> (code $ pack $ prettyInfo $ head i)
+      showOverride i = case tail i of
+        [] -> []
+        x  -> [simpleTable [] [[ plain $ text $ pack "Overrides:"
+                               , catMap (plain . code . pack . prettyInfo) x ]]]
+
+-----------------------------------
+    
+formattedBinds :: InstMap -> Map [Blocks]
 formattedBinds = groupAll . map format . foldr flatten [] . idEntries
   where
-    flatten (pl, Ref id il bs) flist =
-      map (\(rpl,wt) -> (getIfName wt, (wt,id,rpl,il,pl))) (idEntries bs) ++ flist
-    format (n,(wt,id,rpl,il,pl)) =
+    flatten (plh, Ref cpid il binds) flist =
+      map (\(rpl,with) -> (plh,cpid,il,rpl,with)) (idEntries binds) ++ flist
+    format (plh,cpid,il,rpl,with) =
       let formInline i = if i then ibold "!" else text ""
-          formBind (Query _) = code
-          formBind (Param _) = iangles . text
-      in (n, ( plain $ formInline il <> iparens (code pl) <>  math "\\rightarrow"
-               <> ilink "cp" id <> text ":" <> formBind wt rpl
-             , wt))
+      in (with, plain $ formInline il <> iparens (code plh) <>  math "\\rightarrow"
+                <> ilink "cp" cpid <> text ":" <> iangles (code rpl))
     groupAll xs = mkMapWith (++) [ (k, [v]) | (k, v) <- xs ]
-
-getI ( q) = head $ splitOn "." q
-getBindName (Param _) = "_internal_"

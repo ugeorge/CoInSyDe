@@ -28,28 +28,30 @@ description:         Please see the README on GitHub at <https://github.com/gith
 dependencies:
 - base >= 4.7 && < 5
 # data types
-- aeson #! needed for pandoc-types
+- aeson      #! needed for pandoc-types
 - pandoc-types
 - HsYAML
 - text
 - binary
 - hashable
+- containers #! needed for Graph type
 - unordered-containers
-# - vector #!
-# - scientific #!
 # control
 - ginger
-# - data-default #!
-# - deepseq #!
 - mtl
 # IO
 - time
 - filepath
+- process
 - directory >= 1.2
 - bytestring >= 0.10
 - prettyprinter
 - pretty-simple >= 3
 
+# - vector #!
+# - scientific #!
+# - data-default #!
+# - deepseq #!
 
 
 library:

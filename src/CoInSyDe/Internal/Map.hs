@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveGeneric, TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE DeriveGeneric #-}
 ----------------------------------------------------------------------
 -- |
 -- Module      :  CoInSyDe.Core.Dict
@@ -86,15 +86,16 @@ union = liftMap2 (M.union)
 -------------------------------------------------------------
 
 -- | Stores information about the current entry (e.g. component).
-data Info = Info { ldFile :: FilePath
-                 , ldLine :: Int
-                 , ldCol :: Int
+data Info = Info { ldFile  :: FilePath
+                 , ldLine  :: Int
+                 , ldCol   :: Int
+                 , comment :: Text
                  } deriving (Read,Show,Generic)
 
 instance Binary Info
 
-prettyInfo (Info f (-1) (-1)) = f
-prettyInfo (Info f l c)  = f ++ " (" ++ show l ++ ":" ++ show c ++ ")"
+prettyInfo (Info f (-1) (-1) _) = f
+prettyInfo (Info f l c _)  = f ++ " (" ++ show l ++ ":" ++ show c ++ ")"
 
 -- | Dictionary associating an 'Id' with an entry (e.g. component), along with its
 -- load history (newest to oldest).
@@ -147,15 +148,3 @@ dictErr k d = "ID " ++ show k ++ " does not exist in the database with elements:
               ++ (show $ ids d)
               -- ++ (TL.unpack $ pShow d)
 
-instance ToDoc l => ToDoc (MapH l) where
-  toDoc pref = definitionList . map makedefs . idEntries
-    where 
-      makedefs (n,(e,i))
-        = (ibold n, [divWith (pref `T.append` n,[pack "def",pref],[]) $ toDoc pref e]
-                    ++ [showLoad i]  ++ showOverride i ++ [horizontalRule])
-      showLoad i = plain $ (text $ pack "Loaded from: ")
-                   <> (code $ pack $ prettyInfo $ head i)
-      showOverride i = if null (tail i) then []
-          else [simpleTable []
-                [[ plain $ text $ pack "Overrides:"
-                 , foldr1 (<>) $ map (plain . code . pack . prettyInfo) $ tail i ]]]

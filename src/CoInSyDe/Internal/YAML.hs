@@ -115,7 +115,8 @@ handleMeta p bs = do
         content = S.intercalate "\n" $ case fmap (S.fromStrict . encodeUtf8) pref of
           Nothing -> lsc
           Just pr -> let alignCode l = S.replicate offset space `S.append` l
-                     in  map (\l -> fromMaybe (alignCode l) (S.stripPrefix pr l)) lsc
+                     in  map (\l -> fromMaybe (alignCode l) (S.stripPrefix pr l))
+                         (map (const "") lsm ++ lsc)
     return (content, Just meta)
       where
         getRoot r = case docRoot r of

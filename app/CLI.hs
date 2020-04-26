@@ -29,8 +29,7 @@ import Text.Pretty.Simple
 -- import Data.Text.Prettyprint.Doc
 -- import Data.Text.Prettyprint.Doc.Render.Text
 
-import CoInSyDe.Target
-import CoInSyDe.Frontend
+import CoInSyDe.Target.C.Core (C(..))
 import CoInSyDe.Internal.Config
 import CoInSyDe.Internal.Docs
 import CoInSyDe.Internal.LibManage
@@ -68,48 +67,25 @@ main = do
     when debug $ pPrint $ "++++++++++ PROJECT " ++ projName conf ++ " ++++++++++"
 
     -- build the load lists
-    libPaths@[tys,nvs,tms,pts] <- buildLoadLists gconf conf
-    when debug $ pPrint libPaths
-
-    case (head $ projTarget conf) of
+    libLists <- buildLoadLists gconf conf
+    reload   <- mapM (fmap (|| force cliconf) . shouldReloadLib conf) libLists
+    when debug $ pPrint $ zip reload libLists
+    
+    case head (projTarget conf) of
       "c" -> do
-        let (tyProxy,nvProxy,tmProxy,ptProxy) = getCProxies
-        tyLib <- loadLibraryObj cliconf gconf conf tyProxy tys
-        when debug $ dbgPrettyLib conf (fst nvs) tyLib
-        
-        nvLib <- loadLibraryObj cliconf gconf conf nvProxy nvs
-        when debug $ dbgPrettyLib conf (fst nvs) nvLib
-        
-        tmLib <- loadLibraryObj cliconf gconf conf tmProxy tms
-        when debug $ dbgPrettyLib conf (fst nvs) tmLib
-        
-        ptLib <- loadLibraryObj cliconf gconf conf ptProxy pts
-        when debug $ dbgPrettyLib conf (fst pts) ptLib
+        (tyLib,cpLib) <- loadLibs C conf reload libLists
+        when debug $ dbgPrettyLib conf "type" tyLib
+        when debug $ dbgPrettyLib conf "pattern" cpLib
 
         unless (isNothing $ docs cliconf) $ dumpLibraryDoc cliconf gconf conf
-          [ ("Types",               toDoc "cp" tyLib)
-          , ("Patterns",            toDoc "cp" ptLib)
-          , ("Native Components",   toDoc "cp" nvLib)
-          , ("Template Components", toDoc "cp" tmLib) ]
-
-        let compDb = (mapDict PtComp ptLib) `dictUnion` (mapDict TmComp tmLib)
-                     `dictUnion` (mapDict NvComp nvLib)
+          [ ("Types",      toDoc "ty" tyLib)
+          , ("Components", toDoc "cp" cpLib) ]
 
         putStrLn "hallo"
 
       other -> putStrLn $ "[WARNING] CoInSyDe does not support target family "
                ++ show other ++ ". Ignoring project " ++ show (projName conf) ++ "!"
 
-loadLibraryObj :: (FromYAML a, Binary a)
-               => CLIConfig -> SuiteConfig -> ProjConfig -> Proxy a
-               -> (String,[FilePath]) -> IO (MapH a)
-loadLibraryObj cliconf gconf conf proxy (what,paths) = do
-  reload <- shouldReloadLib conf what paths
-  if reload || force cliconf
-    then do lib <- loadLibs what paths
-            dumpObj conf what lib
-            return lib
-    else loadObj conf what
 
 -- dumpLibraryDoc :: CliConfig -> SuiteConfig -> ProjConfig -> Maybe String
 --                -> [(String, Blocks)] -> IO ()

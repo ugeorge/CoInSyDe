@@ -93,23 +93,26 @@ buildLoadLists :: SuiteConfig  -- ^ Workspace configuration
                -> IO [LibLoadList]
                -- ^ load lists for @[types,natives,templates,patterns]@
 buildLoadLists suite proj = withCurrentDirectory (workspaceRoot suite) $ do
-  let target   = projTarget proj
-  tyPaths <- saneCheck target "type"     <$> mapM listDirectory (typePaths suite)
-  nvPaths <- saneCheck target "native"   <$> mapM listDirectory (nativePaths suite)
-  tpPaths <- saneCheck target "template" <$> mapM listDirectory (templatePaths suite)
+  let target    = projTarget proj
+      listDir d = listDirectory d >>= mapM (canonicalizePath . (d </>))
+  tyPaths <- saneCheck target "type"     <$> mapM listDir (typePaths suite)
+  nvPaths <- saneCheck target "native"   <$> mapM listDir (nativePaths suite)
+  tpPaths <- saneCheck target "template" <$> mapM listDir (templatePaths suite)
   return [ LL "type"     (tyPaths ++ projTypes proj)
          , LL "native"   (reverse $ nvPaths ++ projNative proj)
          , LL "template" (reverse tpPaths)
-         , LL "pattern"  (reverse $ projPatts proj)]
+         , LL "pattern"  (projPatts proj)]
 
 saneCheck :: TargetId -> String -> [[FilePath]] -> [FilePath]
 saneCheck target kind paths | all (checkDup []) sorted = concat sorted
   where
-    filtered = map (filter (\p -> baseNameMatch p && targetMatch p)) paths
+    filtered = map (filter (\p -> visible p && baseNameMatch p && targetMatch p)) paths
     sorted   = map (sortBy (compare `on` length . extractTarget)) filtered
     ------------------------------------------------------
     baseNameMatch p = extractBaseName p == ("coinlib-" ++ kind)
     targetMatch   p = extractTarget p `isPrefixOf` target
+    visible       p = not $ any (\f -> f $ takeFileName p)
+                      [ isPrefixOf ".",  isPrefixOf "#", isSuffixOf "~"]
 
 checkDup :: [TargetId] -> [FilePath] -> Bool
 checkDup _ [] = True
@@ -143,12 +146,11 @@ shouldReloadLib proj (LL what srcs) = do
 -- ones with the same ID.
 loadLibs :: Target l
          => l                      -- ^ proxy
-         -> Bool                   -- ^ Force reload
          -> ProjConfig             -- ^ Project configuration
+         -> [Bool]                 -- ^ see 'shouldReloadLib'
          -> [LibLoadList]          -- ^ See 'buildLoadLists'
          -> IO (MapH (Type l), MapH (Comp l))
-loadLibs _ force conf libs@[tys,nvs,tms,pts] = do
-  [lty,lnv,ltm,lpt] <- mapM (fmap (|| force) . shouldReloadLib conf) libs
+loadLibs _ conf [lty,lnv,ltm,lpt] [tys,nvs,tms,pts] = do
   tyLib <- if lty
            then parseYDocs makeTyLibs emptyMap tys
            else loadObj conf (llWhat tys)
@@ -174,23 +176,27 @@ makeTyLibs what lib doc  = (yamlRoot doc |= pack what) >>= foldM load lib
   where load lib node = do
           name  <- node @! "name"
           entry <- mkType lib node
-          return $ dictUpdate Replace name entry (mkInfo doc node) lib 
+          info  <- mkInfo doc node
+          return $ dictUpdate Replace name entry info lib 
 
 makeCpLibs :: Target l => MapH (Type l) -> String -> MapH (Comp l) -> YDoc
            -> YParse (MapH (Comp l))
 makeCpLibs tyLib what lib doc  = (yamlRoot doc |= pack what) >>= foldM load lib
   where load lib node = do
-          name  <- node @! "name"
-          entry <- case what of
-                     "native"   -> mkNative tyLib node
-                     "template" -> mkTemplate tyLib node
-                     "pattern"  -> mkPattern tyLib lib node
-          return $ dictUpdate Keep name entry (mkInfo doc node) lib 
+          name <- node @! "name"
+          info <- mkInfo doc node
+          (policy,entry) <- case what of
+            "native"   -> (,) Keep    <$> mkNative tyLib node
+            "template" -> (,) Keep    <$> mkTemplate tyLib node
+            "pattern"  -> (,) Replace <$> mkPattern tyLib lib node
+          return $ dictUpdate policy name entry info lib 
 
 -- | Gets parser information about a node
-mkInfo :: YDoc -> YMap -> Info
-mkInfo doc node = let (line,column) = getLineAndColumn node
-                  in Info (yamlPath doc) line column
+mkInfo :: YDoc -> YMap -> YParse Info
+mkInfo doc node =  do
+  let (line,column) = getLineAndColumn node
+  comment <- node @? "comment" @= ""
+  return $ Info (yamlPath doc) line column comment
 
 loadObj :: Binary l => ProjConfig -> String -> IO l
 loadObj conf what = liftM Bin.decode $ BL.readFile (projObjPath what conf) 

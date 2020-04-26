@@ -23,7 +23,8 @@ module CoInSyDe.Target.C.Core (
   ) where
 
 import GHC.Generics (Generic)
-import Data.Text (Text, append, pack)
+import Data.Text (Text, append, pack, unpack, breakOn, tail)
+import Data.Text.Read (decimal)
 import Data.Binary (Binary)
 import Text.Pandoc.Builder hiding (Target)
 
@@ -37,7 +38,7 @@ import CoInSyDe.Internal.YAML
 -- 'Requ C'), by instantiating the 'Target' type class.
 data C = C
 
-data Kind = LocVar | GlobVar | InArg | OutArg | RetArg
+data Kind = LocVar | GlobVar | InArg Int | OutArg Int | RetArg
           deriving (Show, Eq, Ord, Generic)
 
 -----------------------------------------------------------------
@@ -46,7 +47,8 @@ instance Target C where
     =  PrimTy {tyId :: Id, tyName :: Text} 
     |  EnumTy {tyId :: Id, tyName :: Text, enumVals  :: [(Id, Maybe Text)]}
     | StrucTy {tyId :: Id, tyName :: Text, sEntries  :: [(Id, Type C)]}
-    |   ArrTy {tyId :: Id, tyName :: Text, arrBaseTy :: Type C, arrSize :: Int}
+    |   ArrTy {tyId :: Id, tyName :: Text, arrBaseTy :: Type C,
+               arrSize :: Either Int Id}
     | Foreign {tyId :: Id, tyName :: Text, oCallPrefix :: Text, oBindPrefix :: Text,
                tyRequ :: [Requ C]}
     |    NoTy {tyName :: Text} -- ^ will always be void
@@ -73,9 +75,14 @@ instance Target C where
                                  return (nm, ty))
                      return $ StrucTy idx name entries
                      
-      "array"  -> do size <- node @! "size"
-                     bty  <- (tyLib !*) <$> (node @! "type") >>=
-                             maybe (yamlError node "Type not loaded!") return
+      "array"  -> do sNum <- node @? "size"
+                     sVar <- node @? "sizeFrom"
+                     size <- case (sNum,sVar) of
+                               (Just s,Nothing) -> return $ Left s
+                               (Nothing,Just i) -> return $ Right i
+                               _ -> yamlError node "Cannot deduce array size!"
+                     bty  <- (tyLib !*) <$> (node @! "baseType") >>= maybe
+                             (yamlError node "Array base type not loaded!") return
                      return $ ArrTy idx (tyName bty) bty size
                      
       "foreign"-> do cprefix <- node @! "callPrefix"
@@ -89,16 +96,18 @@ instance Target C where
               deriving (Show, Generic)
   mkPort tyLib node = do
     name <- node @! "name"
-    kind <- node @! "kind" :: YParse Text
+    kind <- (breakOn ".") <$> node @! "kind"
     ty   <- (tyLib !*) <$> (node @! "type") >>=
             maybe (yamlError node "Type not loaded!") return
     val  <- node @? "value"
-    case kind of
-      "iarg"  -> return $ Var name InArg ty val
-      "oarg"  -> return $ Var name OutArg ty val
-      "ret"   -> return $ Var name RetArg ty val
-      "var"   -> return $ Var name LocVar ty val
-      "state" -> return $ Var name GlobVar ty val
+    case (fst kind, decimal $ Data.Text.tail $ snd kind) of
+      ("iarg",Left err)   -> yamlError node $ "Position for input argument: " ++ err
+      ("oarg",Left err)   -> yamlError node $ "Position for output argument: " ++ err
+      ("iarg",Right(p,_)) -> return $ Var name (InArg p) ty val
+      ("oarg",Right(p,_)) -> return $ Var name (OutArg p) ty val
+      ("ret",_)   -> return $ Var name RetArg ty val
+      ("var",_)   -> return $ Var name LocVar ty val
+      ("state",_) -> return $ Var name GlobVar ty val
       x -> yamlError node "Port kind not recognized!"
 
   data Requ C = Include Text deriving (Show, Eq, Generic)
@@ -145,8 +154,7 @@ tylink ty     = ilink "ty" (tyId ty)
  
 -- -- isMacro Macro{} = True
 -- -- isMacro _       = False
--- isGlobal v@Variable{} = ifKind v == GlobVar
--- isGlobal _ = False
+isGlobal v = pKind v == GlobVar
 
 -- getTypeOf Macro{} = Nothing
 -- getTypeOf interf  = Just $ ifTy interf
