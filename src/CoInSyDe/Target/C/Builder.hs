@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 ----------------------------------------------------------------------
 -- |
 -- Module      :  CoInSyDe.Backend.C.Proj
@@ -12,7 +13,8 @@
 -- only the information necessary to simplify code generation and pretty printing.
 ----------------------------------------------------------------------
 module CoInSyDe.Target.C.Builder (
-  Proj(..) --, buildProjStructure, getDependencies
+  Proj(..), buildProjs, drawDotGraph,
+  resolveIncludes, getFunDecls, getTypeDecls, getGlobVars
   ) where
 
 import Data.Graph as G
@@ -25,8 +27,11 @@ import Data.Text as T
 
 import Control.Monad
 import Control.Monad.State.Lazy
+import Text.Dot
+import Text.Pandoc.Builder
 
 import CoInSyDe.Core
+import CoInSyDe.Internal.Docs
 import CoInSyDe.Internal.Map
 import CoInSyDe.Target.C.Core
 
@@ -39,17 +44,31 @@ data Proj = Proj
   , topModule :: Id
   , callStack :: [(Id,Info)]
   , namespace :: HashSet Id
-  , funDecls  :: [Id]                  -- ^ functions that need to be declared
+  , funDecls  :: HashSet Id            -- ^ functions that need to be declared
   , includes  :: Map (Vertex,[Vertex]) -- ^ will be dependency graph
   , globVars  :: Map (Port C)          -- ^ set of global variables
   , typeDecls :: Map (Type C)          -- ^ set of types used
-  , allFuncs  :: MapH (Comp C)         -- ^ only the components called from top module
+  , projComps :: MapH (Comp C)         -- ^ only the components called from top module
   } deriving (Show)
 
 emptyProj :: Id -> Proj
-emptyProj top = Proj greet top [] S.empty [] emptyMap emptyMap emptyMap emptyMap
+emptyProj top = Proj greet top [] S.empty S.empty emptyMap emptyMap emptyMap emptyMap
 
 greet = pack "// Generated with CoInSyDe : Code Synthesizer for System Design //"
+
+resolveIncludes :: Proj -> [Id]
+resolveIncludes proj = L.map ((\(i,_,_) -> i) . getNode) $ G.topSort graph
+  where (graph,getNode,_)  = graphFromEdges $ L.map (\(i,(h,d)) -> (i,h,d))
+                             $ idEntries $ includes proj
+
+getFunDecls :: Proj -> [Id]
+getFunDecls = S.toList . funDecls
+
+getTypeDecls :: Proj -> [Type C]
+getTypeDecls = entries . typeDecls
+
+getGlobVars :: Proj -> [Port C]
+getGlobVars = entries . globVars
 
 --------------------------------------------------------------------
 
@@ -58,73 +77,34 @@ buildProjs :: MapH (Comp C) -- ^ the /complete/ component database
            -> [Id]          -- ^ list with top module 'Id's
            -> [Proj]
 buildProjs db = L.map (\n -> execState (projBuilder db n) (emptyProj n)) 
-
+        
 projBuilder :: MapH (Comp C) -> Id -> ProjBuilder ()
 projBuilder db n = case db !? n of
   Just (entry, info:_) -> do
     pushCallStack n info
     updateRequirements $ cpReqs entry
-    traversePorts $ cpIfs entry
-  
-    -- only time namespace is "reset" is when referenced non-inlined -> to globspace
+    newPorts <- mapM traversePort $ cpIfs entry
+    -- -- debug
+    -- ns <- namespace <$> get
+    -- gr <- greeter <$> get
+    -- let dbg = gr `T.append` "\n-" `T.append` n `T.append` ": "
+    --           `T.append` T.pack (show ns)
+    -- modify $ \s -> s { greeter = dbg }
+    -- -- end debug
+
+    _ <- case entry of
+      TmComp{} ->
+        forM_ (cpRefs entry) $ \ref ->
+          if refInline ref then projBuilder db (refId ref)
+          else withFreshNamespace (refId ref) $ projBuilder db (refId ref)
+      NvComp{} -> return ()
+
+    let newEntry = entry { cpIfs = newPorts }
+    modify $ \s -> s { projComps = dictUpdate Keep n newEntry info $ projComps s }
     popCallStack
     
   Nothing -> throwError $ "Referenced component " ++ show n ++ " does not exist!"
-
--- -- | Builds a list of 'Proj' structure for each top module declared.
--- buildProjStructure :: MapH (Comp C) -- ^ the /complete/ component database
---                    -> [Id]   -- ^ list with top module 'Id's
---                    -> [Proj]
--- buildProjStructure db = L.map (\n -> updateProj db (db !* n) (emptyProj n))
-
--- traverseProj :: MapH (Comp C) -> Comp C -> Proj -> Proj
--- traverseProj db cp@NvComp{} proj = updateProj db cp proj
--- traverseProj db cp@TmComp{} proj =
---   M.foldr (\n -> updateProj db (db !* n)) proj (M.map refId $ refs cp)
-
-
--- updateProj :: MapH (Comp C) -> Comp C -> Proj -> Proj
--- updateProj db cp proj =
---   go cp $ proj { welcome  = newWelcome
---                , funDecls = newFunDecls cp
---                , requmnts = newReqmnts
---                , globVars = newGlobVars
---                , allTypes = newTypes
---                , allFuncs = newFuncs
---                }
---   where
---     ---------- SAME FOR ALL COMPONENT TYPES ----------
---     -- no modification to the greeter message
---     newWelcome  = welcome proj
---     -- check requirements of used types and components
---     newReqmnts  = nub $ requmnts proj ++ reqs cp ++
---                   L.concatMap tyRequ (L.filter isForeign currTypes)
---     -- only states are allowed to be declared as global variables
---     newGlobVars = M.union (globVars proj) (M.filter isGlobal $ ifs cp)
---     -- only non-foreign types need to be declared
---     newTypes    = nub $ allTypes proj ++ L.filter canDeclare currTypes
---     -- transfer component as-is
---     newFuncs    = dictTransfer (cpName cp) db (allFuncs proj)
---     ---------- DIFFERENT BETWEEN COMPONENT TYPES ----------
---     -- if it is a component, continue traversing the project
---     go cp@TmComp{} = traverseProj db cp
---     -- if it is a native, stop!
---     go cp@NvComp{} = id
---     -- only the functions which are not called as inline need to be declared
---     newFunDecls cp@TmComp{} = nub $ funDecls proj
---       ++ (L.map refId . M.elems . M.filter (not . inline)) (refs cp)
---     -- in the case of native functions without source code, they are removed from the
---     -- declaration list
---     newFunDecls cp@NvComp{} = maybe (L.delete (cpName cp) (funDecls proj))
---       (const $ funDecls proj) (funCode cp)
---     ---------- AUXILLIARY FUNCTIONS ----------
---     canDeclare x = not $ isForeign x || isPrimitive x || isArray x
---     currTypes    = J.mapMaybe getTypeOf (M.elems $ ifs cp)
---     -- errGlob k    = "Global variable " ++ show k ++ " declared multiple times."
-
--- getDependencies = L.map (\(Include f) -> unpack f) . requmnts
-
-
+  
 -----------------------------------------------
 
 updateRequirements :: [Requ C] -> ProjBuilder ()
@@ -136,20 +116,34 @@ updateRequirements rlist = unless (L.null rlist) $ do
       rule (i,h,d) = M.insertWith (\(_,nd) (h',md) -> (h',nd++md)) i (h,d)
   modify $ \s -> s { includes = L.foldr (liftMap . rule) rgraph paired }
 
--- updates variable names, namespace and global variable space
-traversePorts :: IfMap C -> ProjBuilder (IfMap C)
-traversePorts = mapM checkVar
-  where
-    checkVar (TPort p) = do
-      uname <- getUniqueName (pName p)
-      let newp = p { pName = uname }
-      when (pKind p == GlobVar) $
-        modify $ \s -> s { globVars = liftMap (M.insert uname newp) $ globVars s }
-      return $ TPort newp
-    checkVar p = return p
-
-
+-- modifies variable name and updates type declarations, namespace, global
+-- variable space and requirements
+traversePort :: If C -> ProjBuilder (If C)
+traversePort (TPort p) = do
+  uname <- getUniqueName (pName p)
+  let newp = p { pName = uname }
+      ty   = pTy p
+  when (isGlobal p) $
+    modify $ \s -> s { globVars = liftMap (M.insert uname newp) $ globVars s }
+  when (isEnum ty || isStruct ty) $
+    modify $ \s -> s { typeDecls = liftMap (M.insert (tyId ty) ty) $ typeDecls s }
+  when (isForeign ty) $
+    updateRequirements $ tyRequ ty
+  return $ TPort newp
+traversePort p = return p
+  
 -----------------------------------------------
+
+-- modifies also the function declarations
+withFreshNamespace :: Id -> ProjBuilder () -> ProjBuilder ()
+withFreshNamespace ref builder = do
+  ns <- namespace <$> get
+  gl <- globVars <$> get
+  modify $ \s -> s { namespace = M.keysSet $ getMap gl }
+  builder
+  gl <- globVars <$> get
+  modify $ \s -> s { namespace = ns `S.union` M.keysSet (getMap gl) }
+  modify $ \s -> s { funDecls = S.insert ref $ funDecls s }
 
 getUniqueName :: Id -> ProjBuilder Id
 getUniqueName n = do
@@ -168,13 +162,80 @@ pushCallStack x a = modify $ \s -> s {callStack = (x,a) : callStack s}
 
 popCallStack :: ProjBuilder ()
 popCallStack = modify $ \s -> s { callStack = L.tail (callStack s) }
-
+    
 throwError :: String -> ProjBuilder a
 throwError msg = do
   st <- get
   let (curr:stack) = callStack st
-  error $ "Error representing core for component " ++ show (fst curr)
-    ++ "\n+++ defined in " ++ prettyInfo (snd curr)
-    ++ L.concatMap (\(c,i) -> "  +> called by " ++ show c ++ " |" ++ prettyInfo i)
-    stack ++ "\n" ++ msg
+  error $ "Error representing core for component\n+++ " ++ show (fst curr)
+    ++ " [" ++ prettyInfo (snd curr) ++ "]"
+    ++ L.concatMap (\(c,i) -> "\n  +> called by " ++ show c
+                     ++ " [" ++ prettyInfo i ++ "]")
+    stack ++ "\n" ++ msg ++ "\n"
   
+-----------------------------------------------
+
+instance ToDoc Proj where
+  toDoc _ p = 
+    header 3 (text "Greeter")
+    <> codeBlock (greeter p)
+    <> header 3 (text "Include list")
+    <> bulletList (L.map codeBlock $ resolveIncludes p)
+    <> header 3 (text "Types to declare")
+    <> bulletList (L.map (toDoc "") $ getTypeDecls p)
+    <> header 3 (text "Functions to declare")
+    <> bulletList (L.map (plain . text) $ getFunDecls p)
+    <> header 3 (text "Global Variables")
+    <> bulletList (L.map (toDoc "") $ getGlobVars p)
+    -- <> header 3 (text "Components")
+    -- <> toDoc "" (projComps p)
+
+--------------------------------------------------------------------
+-- Separate builder for dot project
+
+drawDotGraph :: Proj -> String
+drawDotGraph proj = showDot $ dotBuilder True (projComps proj) (topModule proj)
+
+
+type DotMap = HashMap Id (HashMap Id NodeId)
+dotBuilder :: Bool -> MapH (Comp C) -> Id -> Dot (DotMap)
+dotBuilder standalone db n = case db !? n of
+  Just (cp, _) -> fmap snd . cluster $ do
+    attribute ("style","rounded,filled")
+    attribute ("label",unpack n)
+    if standalone
+      then attribute ("fillcolor","lightgrey")
+      else attribute ("fillcolor","white")
+    
+    maps <- case cp of
+      NvComp{} -> return M.empty
+      TmComp{} -> L.foldr1 M.union <$> forM (entries $ cpRefs cp)
+                  (\ref -> dotBuilder (not $ refInline ref) db (refId ref))
+      
+    ids <- forM (idEntries $ cpIfs cp) $ \(i,p) -> case p of
+      TPort (Var n (InArg _) _ _) -> liftM ((,) i)
+        $ node [("shape","invtriangle"),("fixedsize","shape"),("label",unpack n)]
+      TPort (Var n (OutArg _) _ _) -> liftM ((,) i)
+        $ node [("shape","triangle"),("fixedsize","shape"),("label",unpack n)]
+      TPort (Var n GlobVar _ _) -> liftM ((,) i)
+        $ node [("shape","doubleoctagon"),("label",unpack n)]
+      TPort (Var n LocVar _ _) -> liftM ((,) i)
+        $ node [("shape","ellipse"),("label",unpack n)]
+      TPort (Var n RetArg _ _) -> liftM ((,) i)
+        $ node [("shape","triangle"),("fixedsize","shape"),("label",unpack n)]
+      Param _ -> liftM ((,) i)
+        $ node [("shape","parallelogram"),("label",unpack i)]
+    let pmap = M.fromList ids
+
+    case cp of
+      NvComp{} -> return ()
+      TmComp{} -> forM_ (idEntries $ cpRefs cp) $ \(ph,ref) ->
+        forM_ (idEntries $ refBinds ref) $ \(repl,with) ->
+        case (M.lookup with pmap, M.lookup repl (maps ! (refId ref))) of
+          (Just src, Just dst) -> src .->. dst 
+          _ -> return ()
+          -- _ -> return $ "[WARNING] connection " ++ show (cpName cp) ++ ":"
+          --      ++ show with ++ "->" ++ show (refId ref) ++ ":" ++ show repl
+          --      ++ " referenced but does not exist!"        
+
+    return $ M.singleton (cpName cp) pmap

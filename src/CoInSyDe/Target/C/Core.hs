@@ -12,20 +12,13 @@
 -- This module contains the core types specific to the family of C-based tagets, and
 -- their constructors.
 ----------------------------------------------------------------------
-module CoInSyDe.Target.C.Core (
-  C(..), Type(..), Port(..), Requ(..), Kind(..),
-  -- * 'Type' constructors
-  -- mkPrimTy, mkEnumTy, mkStruct, mkArray, mkForeign,
-  -- -- * 'If' (interface) constructors
-  -- mkGeneric, mkState, mkParam,
-  -- -- * Utilities
-  -- isPrimitive,isForeign,isVoid,isArray,isMacro,isGlobal,getTypeOf
-  ) where
+module CoInSyDe.Target.C.Core where
 
-import GHC.Generics (Generic)
+import Data.Binary (Binary)
+import Data.List (sortOn)
 import Data.Text (Text, append, pack, unpack, breakOn, tail)
 import Data.Text.Read (decimal)
-import Data.Binary (Binary)
+import GHC.Generics (Generic)
 import Text.Pandoc.Builder hiding (Target)
 
 import CoInSyDe.Core
@@ -120,6 +113,9 @@ instance Binary (Type C)
 instance Binary (Port C)
 instance Binary (Requ C)
 
+tylink NoTy{} = ilink "#" "void"
+tylink ty     = ilink "ty" (tyId ty)
+
 instance ToDoc (Type C) where
   toDoc _ (PrimTy i n) = plain $ code n <> text ": primitive"
   toDoc _ (EnumTy i n m) = definitionList [
@@ -134,29 +130,54 @@ instance ToDoc (Type C) where
     (code n <> text ": foreign", map (toDoc "") r)]
 
 instance ToDoc (Port C) where
-  toDoc _ (Var name kind ty val) = (plain $ text ":" <> tylink ty)
-    <> (plain $ text (pack $ show kind) <> code (maybe "" (append "=") val))
+  toDoc _ (Var name kind ty val) = (plain $ code (pack $ show kind))
+    <> (plain $ text name <> text ":" <> tylink ty <> code (maybe "" (append "=") val))
 
 instance ToDoc (Requ C) where
   toDoc _ (Include r) = plain $ text "include: " <> code r
 
-tylink NoTy{} = ilink "#" "void"
-tylink ty     = ilink "ty" (tyId ty)
-
--- isPrimitive PrimTy{}  = True
--- isPrimitive _         = False
--- isForeign Foreign{}   = True
--- isForeign _           = False
--- isVoid NoTy{}         = True
--- isVoid _              = False
--- isArray ArrTy{}       = True
--- isArray _             = False
+isPrim PrimTy{}     = True
+isPrim _            = False
+isEnum EnumTy{}     = True
+isEnum _            = False
+isStruct StrucTy{}  = True
+isStruct _          = False
+isArray ArrTy{}     = True
+isArray _           = False
+isForeign Foreign{} = True
+isForeign _         = False
+isVoid NoTy{}       = True
+isVoid _            = False
  
--- -- isMacro Macro{} = True
--- -- isMacro _       = False
 isGlobal v = pKind v == GlobVar
 
--- getTypeOf Macro{} = Nothing
--- getTypeOf interf  = Just $ ifTy interf
+-- Interface separator. Does a lot of plumbing when it comes to maniputaling the
+-- interfaces.
+data IfSeparator = Sep {
+  iarg  :: [Port C], oarg  :: [Port C], args ::[Port C], ret ::  Port C,
+  var :: [Port C], state :: [Port C], param :: [YNode]
+  } deriving (Show)
+categorize ifmap = case ret' of
+  []    -> Right $ Sep iarg oarg args voidret var state param
+  [ret] -> Right $ Sep iarg oarg args ret var state param
+  xs    -> Left  $ "C cannot return more than one argument: " ++ show xs
+  where
+    ifs   = entries ifmap
+    param = [ x | Param x <- ifs ]
+    args  = sortOn (getPos . pKind) [ x | TPort x <- ifs
+                                        , isInArg (pKind x) || isOutArg (pKind x) ]
+    iarg  = [ x | x <- args, isInArg (pKind x) ]
+    oarg  = [ x | x <- args, isOutArg (pKind x) ]
+    var   = [ x | TPort x@(Var _ LocVar _ _) <- ifs ]
+    state = [ x | TPort x@(Var _ GlobVar _ _) <- ifs ]
+    ret'  = [ x | TPort x@(Var _ RetArg _ _) <- ifs ]
+    --------------------------------------------
+    voidret = Var "_out_" RetArg (NoTy "void") Nothing
+    getPos (InArg x)  = x
+    getPos (OutArg x) = x
+    isInArg  (InArg _)  = True
+    isInArg  _          = False
+    isOutArg (OutArg _) = True
+    isOutArg _          = False
 
 

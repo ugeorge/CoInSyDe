@@ -111,7 +111,7 @@ data ProjConfig
                , projTypes  :: [FilePath] -- ^ type sources
                , projPatts  :: [FilePath] -- ^ pattern component sources
                , projNative :: [FilePath] -- ^ native component sources
-               , projTop    :: Text       -- ^ Top module
+               , projTops   :: [Text]     -- ^ Top modules
                , projDocs   :: FilePath   -- ^ overrides location of docs dump
                , projCode   :: FilePath   -- ^ Path where code will be dumped
                , projObj    :: FilePath   -- ^ Path for obdump files
@@ -126,7 +126,7 @@ loadProjConfigs suite doc = either (die . prettyErr doc) return
     parseProj (Mapping _ _ obj) = do
       name     <-               unpack <$> obj .: "name"
       target   <-          splitOn "." <$> obj .: "target"
-      topMod   <-                          obj .: "top-module"
+      topMod   <-                          obj .: "top-modules"
       docs     <-          fmap unpack <$> obj .:? "docs-path"
       code     <-          fmap unpack <$> obj .:? "code-path"
       allMaybe <- (fmap . fmap) unpack <$> obj .:? "all-defs"
@@ -141,7 +141,7 @@ loadProjConfigs suite doc = either (die . prettyErr doc) return
         , projTypes  = map ((</>) projRoot) $ fromMaybe (fromJust allMaybe) typMaybe
         , projPatts  = map ((</>) projRoot) $ fromMaybe (fromJust allMaybe) patMaybe
         , projNative = map ((</>) projRoot) $ fromMaybe (fromJust allMaybe) natMaybe
-        , projTop    = topMod
+        , projTops   = topMod
         , projDocs   = fromMaybe (docsPath suite) docs </> name
         , projCode   = fromMaybe (codePath suite) code </> name
         , projObj    = objDumpPath suite

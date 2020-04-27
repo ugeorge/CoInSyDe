@@ -22,7 +22,7 @@ module CoInSyDe.Internal.Map (
   -- * History-Bookkeeping Map
   MapH, Info(..), Policy(..), prettyInfo,
   mkDict, (!*), (!^), mapDict, 
-  dictUpdate, dictTransfer, dictUnion
+  dictUpdate, dictUnion
   ) where
 
 import           Data.Maybe (fromMaybe)
@@ -73,7 +73,7 @@ entries = M.elems . getMap
 idEntries = M.toList . getMap
 
 insertWith f k v = liftMap (M.insertWith f k v)
-union = liftMap2 (M.union)
+union = liftMap2 M.union
 
 -- | Genric 'Map' selector. Throws a more meaningful error message than the default
 -- one.
@@ -132,10 +132,6 @@ dictUpdate Keep    name c info = liftMap (M.insertWith fKeep name (c,[info]))
 
 fReplace (a,newh) (_,oldh) = (a,newh++oldh)
 fKeep    (_,newh) (a,oldh) = (a,oldh++newh)
-
--- | Transfers an entry from a dictionary to another.
-dictTransfer :: Show t => Id -> MapH t -> MapH t -> MapH t
-dictTransfer name src = liftMap (M.insertWith (\_ a -> a) name (src !?! name))
 
 dictUnion :: MapH t -> MapH t -> MapH t
 dictUnion = liftMap2 (M.unionWithKey err)

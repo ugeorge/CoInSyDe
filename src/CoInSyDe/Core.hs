@@ -96,7 +96,7 @@ deriving instance Target l => Show (If l)
 -- | Container used for storing a reference to a functional component. 
 data Instance =
   Ref { refId     :: Id     -- ^ functional component ID
-      , retInline :: Bool   -- ^ True if expanded inline
+      , refInline :: Bool   -- ^ True if expanded inline
       , refBinds  :: Map Id -- ^ bindings between parent and component
       } deriving (Show, Generic)
 instance Binary Instance

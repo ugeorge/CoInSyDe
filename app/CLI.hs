@@ -24,17 +24,19 @@ import Data.Proxy (Proxy)
 import Control.Monad
 import Data.Maybe
 import Text.Pretty.Simple
+import Data.Text (unpack)
 -- import Data.List
--- import Data.Text (unpack)
 -- import Data.Text.Prettyprint.Doc
 -- import Data.Text.Prettyprint.Doc.Render.Text
 
-import CoInSyDe.Target.C.Core (C(..))
 import CoInSyDe.Internal.Config
 import CoInSyDe.Internal.Docs
 import CoInSyDe.Internal.LibManage
 import CoInSyDe.Internal.Map
 import CoInSyDe.Internal.YAML (YNode)
+
+import CoInSyDe.Target.C.Core (C(..))
+import CoInSyDe.Target.C.Builder
 
 data CLIConfig = CLIConfig { force   :: Bool
                            , docs    :: Maybe String
@@ -77,9 +79,21 @@ main = do
         when debug $ dbgPrettyLib conf "type" tyLib
         when debug $ dbgPrettyLib conf "pattern" cpLib
 
-        unless (isNothing $ docs cliconf) $ dumpLibraryDoc cliconf gconf conf
+        unless (isNothing $ docs cliconf) $
+          dumpLibraryDoc cliconf gconf conf "Libs" "Loaded Libraries"
           [ ("Types",      toDoc "ty" tyLib)
           , ("Components", toDoc "cp" cpLib) ]
+
+        let proj = buildProjs cpLib (projTops conf)
+        unless (isNothing $ docs cliconf) $
+          forM_ proj $ \p -> do
+          let pName = unpack (topModule p)
+          dumpLibraryDoc cliconf gconf conf
+            ("Proj-" ++ pName) ("Project for top module: " ++ pName)
+            [ ("Meta",       toDoc "" p)
+            , ("Components", toDoc "cp" $ projComps p) ]
+          writeFile (projDocs conf </> ("Graph-" ++ pName) <.> "dot") $
+            drawDotGraph p
 
         putStrLn "hallo"
 
@@ -89,14 +103,14 @@ main = do
 
 -- dumpLibraryDoc :: CliConfig -> SuiteConfig -> ProjConfig -> Maybe String
 --                -> [(String, Blocks)] -> IO ()
-dumpLibraryDoc cliconf gconf conf content = do
+dumpLibraryDoc cliconf gconf conf filename title content = do
   createDirectoryIfMissing True (projDocs conf)
   time <- getCurrentTime
   let format   = fromJust $ docs cliconf
       otherOpt = docopts cliconf
-      jsonFile = projDocs conf </> "Libs" <.> "json"
-      docFile  = projDocs conf </> "Libs" <.> format
-      pandoc   = makeDoc "Loaded Libraries" (projName conf)
+      jsonFile = projDocs conf </> filename <.> "json"
+      docFile  = projDocs conf </> filename <.> format
+      pandoc   = makeDoc title (projName conf)
                  (targetidToText $ projTarget conf) (show time)
                  (coinsydeVersion gconf) (workspaceRoot gconf) content
   writePandocJson jsonFile pandoc

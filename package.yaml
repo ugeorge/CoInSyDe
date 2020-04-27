@@ -39,6 +39,7 @@ dependencies:
 # control
 - ginger
 - mtl
+- dotgen
 # IO
 - time
 - filepath
