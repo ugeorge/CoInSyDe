@@ -84,13 +84,7 @@ projBuilder db n = case db !? n of
     pushCallStack n info
     updateRequirements $ cpReqs entry
     newPorts <- mapM traversePort $ cpIfs entry
-    -- -- debug
-    -- ns <- namespace <$> get
-    -- gr <- greeter <$> get
-    -- let dbg = gr `T.append` "\n-" `T.append` n `T.append` ": "
-    --           `T.append` T.pack (show ns)
-    -- modify $ \s -> s { greeter = dbg }
-    -- -- end debug
+    -- TODO: update greeter with relevant info
 
     _ <- case entry of
       TmComp{} ->

@@ -1,8 +1,16 @@
 {-# LANGUAGE DeriveGeneric, FlexibleInstances, OverloadedStrings #-}
-module CoInSyDe.Internal.YAML where
+module CoInSyDe.Internal.YAML (
+  ToYAML(..),
+  YDoc(..), YMap, YNode, YPos, YParse,
+  getPos, getLineAndColumn, getChildren, (|=),
+  getAttr, queryNode, (@!), (@?), (@=), (@^),
+  readYDoc, withYDoc, parseYDoc, writeYAML,
+  yamlError, prettyErr, prettyYNode
+  ) where
 
 import           Control.Monad (liftM,when)
 import qualified Data.ByteString.Lazy as S
+import qualified Data.ByteString.Lazy.Char8 as SC (unpack)
 import           Data.Maybe
 import           Data.Binary
 import           Data.Text (Text,append)
@@ -149,16 +157,12 @@ prettyErr :: YDoc -> (Pos,String) -> String
 prettyErr (YDoc f s _ _) (pos,msg) = prettyPosWithSource pos s
   (" Parse error in file\n++++ " ++ f ++ "" ) ++ msg ++ "\n"
 
+prettyYNode :: Node () -> String
+prettyYNode = SC.unpack . encode1
+
 -- instance Read (Node Pos) where
 --   readsPrec p str = [ (makeNode x, y) | (x, y) <- readsPrec p str ]
 --     where makeNode = either (error . show) id . decode1 . packChars
-
--- instance NFData (Node Pos) where
---   rnf (Scalar l s)     = rnf l `seq` rnf s
---   rnf (Mapping l _ m)  = rnf l `seq` rnf m
---   rnf (Sequence l _ s) = rnf l `seq` rnf s
---   rnf (Anchor l _ a)   = rnf l `seq` rnf a
-
 
 --- TODO: make Node an instance of Ginger.GVal, e.g.
 -- -- | Convert Aeson 'Value's to 'GVal's over an arbitrary host monad. Because

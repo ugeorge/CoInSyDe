@@ -53,7 +53,6 @@ instance Foldable Map where
 instance Traversable Map where
   traverse f x = Map <$> traverse f (getMap x)
 
-
 instance Binary v => Binary (Map v) where
   put = put . M.toList . getMap
   get = (Map . M.fromList) <$> get
