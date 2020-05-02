@@ -1,11 +1,15 @@
 {-# LANGUAGE FlexibleContexts, OverloadedStrings #-}
-module CoInSyDe.Internal.Ginger where
+module CoInSyDe.Internal.Ginger (
+  GAcc, GContext, mkGingerContext, execG,
+  mkPlaceholderFun, rangeFun, portLookupFun
+  ) where
 
 import           Control.Monad.Writer.Lazy
 import           Data.Default
-import qualified Data.HashMap.Strict as H
+import qualified Data.HashMap.Strict as M
 import           Data.Text (Text)
 import qualified Data.Text as T
+import           Data.YAML (Node)
 import           Text.Ginger
 import           Text.Ginger.GVal
 import           Text.Ginger.Run.Type (GingerContext (..),throwHere)
@@ -39,21 +43,24 @@ execG  = getAccum . execWriter
 
 -- | Makes a template placeholder function from a target function @\ id arglist@. This
 -- function uses only positional arguments.
-mkPlaceholderFun :: (Text -> [Text] -> Text) -> Function GRunner
+mkPlaceholderFun :: (Text -> [Text] -> Either Text Text) -> Function GRunner
 mkPlaceholderFun f xs = do
-  _ <- liftRun2 newG $ (\(name:args) -> f name args) $ map (asText . snd) xs
+  let (name:args) =  map (asText . snd) xs
+      pArgs = T.intercalate "; " args
+  transformed <- either (throwHere . ArgumentsError (Just pArgs)) return $ f name args
+  _ <- liftRun2 newG transformed
   return def
 
-mkGingerContext :: Info      -- ^ where the template source is found
-                -> (Text -> [Text] -> Text)
+mkGingerContext :: Info          -- ^ where the template source is found
+                -> Map (Node ()) -- ^ built YAML dictionary
+                -> (Text -> [Text] -> Either Text Text)
                 -- ^ placeholder expander function defined by the target
-                -> Map YNode -- ^ built YAML dictionary
-                -> GContext  -- ^ Ginger context
-mkGingerContext info phFun usrDict = makeContextTextExM look write except
+                -> GContext      -- ^ Ginger context
+mkGingerContext info usrDict phFun = makeContextTextExM look write except
   where
     look :: VarName
          -> Run SourcePos GWriter Text (GVal (Run SourcePos GWriter Text))
-    look k = return $ toGVal $ contextDict !? T.pack k
+    look k = return $ toGVal $ contextDict !? k
 
     write :: Text -> GWriter ()
     write = tellG . Right
@@ -70,46 +77,39 @@ mkGingerContext info phFun usrDict = makeContextTextExM look write except
       ++ "\n" ++ T.unpack (runtimeErrorMessage e)
       
     contextDict :: Map (GVal GRunner)
-    contextDict = H.insert "placeholder"
-                  (fromFunction $ mkPlaceholderFun phFun) $
-                  -- H.insert "range"
-                  -- (fromFunction rangeF) $
-                  -- H.insert "interface"
-                  -- (fromFunction returnIfF) $
-                  (H.map toGVal usrDict)
+    contextDict = M.insert "placeholder" (fromFunction $ mkPlaceholderFun phFun) $
+                  M.insert "range"       (fromFunction rangeFun) $
+                  M.insert "port"        (fromFunction portLookupFun) $
+                  M.map toGVal usrDict
 
--- fromTemplate :: Target l
---              => TplContext
---              -> Source -- -> (Writer Text) Text
---              -> Gen o l Text
--- fromTemplate context tpl = do
---   let options  = mkParserOptions (\_ -> return Nothing)
---       errParse = throwTemplateParse . formatParserError (Just tpl) 
---   template <- either errParse return =<< parseGinger' options tpl
---   let status = execTplM $ runGingerT context (optimize template) 
---   case status of
---     Left err   -> throwTemplateRun err
---     Right code -> return code
+------------------------------------------------------------------    
 
--- ------------------------------------------------------------------    
--- -- U kidding me?! Ginger has no 'range' function. I need to define it
-
--- rangeF :: Monad m => Function (Run p m h)
--- rangeF [] = return def -- TODO: throw error
--- rangeF ((_,x):_) = do
---   xNum <- maybe (throwHere $ ArgumentsError (Just "range")
---                   $ T.pack $ show x ++ " is not a number!")
---           return $ asNumber x
---   xInt <- maybe (throwHere $ ArgumentsError (Just "range")
---                   $ T.pack $ show x ++ " is not an integer!")
---           return $ toBoundedInteger xNum
---   return $ toGVal ([0..xInt-1] :: [Int])
-
--- returnIfF :: Monad m => Function (Run p m h)
--- returnIfF [] = return def -- TODO: throw error
--- returnIfF ((_,x):_) = do
---   context <- getVar (asText x)
---   return $ toGVal context
+-- | Template range function called with @range@. Usage:
+--
+-- > range (from = 0, step = 1, <to>)
+--
+-- where @<to>@ is mandatory and needs to be an integer.
+rangeFun :: Monad m => Function (Run p m h)
+rangeFun [] = throwHere $ ArgumentsError (Just "range") "called with no arguments!"
+rangeFun args = do
+  when (null pArgs) $ throwHere $ ArgumentsError (Just "range") "Range not given!"
+  from <- flip (maybe (return 0)) (M.lookup "from" nArgs) $
+          \x -> maybe (err x " is not an integer!") return (toInt x)
+  step <- flip (maybe (return 1)) (M.lookup "range" nArgs) $
+          \x -> maybe (err x " is not an integer!") return (toInt x)
+  to   <- maybe (err pArgs " is not an integer!") return (toInt $ head pArgs)
+  return $ toGVal ([from, from+step .. to-1] :: [Int])
+  where
+    (nArgs, pArgs, _) = matchFuncArgs ["from","step"] args
+    err x msg = throwHere $ ArgumentsError (Just "range") $ T.pack (show x ++ msg)
 
 
--- TODO: yaml2gval helper, passign through JSON. The rest just instantiate ToGVAL
+-- | Custom lookup function called with @port@, useful whe the lookup key is the
+-- result of a prior expression. Usage.
+--
+-- > port(key)
+portLookupFun :: Monad m => Function (Run p m h)
+portLookupFun [] = throwHere $ ArgumentsError (Just "port") "called with no argument!"
+portLookupFun ((_,x):_) = do
+  context <- getVar (asText x)
+  return $ toGVal context

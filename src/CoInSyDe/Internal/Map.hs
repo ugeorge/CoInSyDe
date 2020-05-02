@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveGeneric, TypeSynonymInstances, FlexibleInstances #-}
 ----------------------------------------------------------------------
 -- |
 -- Module      :  CoInSyDe.Core.Dict
@@ -14,27 +14,24 @@
 ----------------------------------------------------------------------
 module CoInSyDe.Internal.Map (
   -- * CoInSyDe 'Map' Type
-  Id, Map(..), mkMap, mkMapWith,
-  isEmpty, ids, entries, idEntries,
-  insertWith, union, (!?), (!?!),
-  -- * Re-wrapped utilities
-  emptyMap, liftMap, liftMap2,
+  Id, Map(..), (!?),
   -- * History-Bookkeeping Map
   MapH, Info(..), Policy(..), prettyInfo,
-  mkDict, (!*), (!^), mapDict, 
-  dictUpdate, dictUnion
+  mkDb, (!*), (!^), mapDb, 
+  dbUpdate, dbUnion
   ) where
 
-import           Data.Maybe (fromMaybe)
 import           Data.Binary
-import           Data.Text as T (Text, pack, append)
 import qualified Data.HashMap.Strict as M
+import           Data.Maybe (fromMaybe)
+import           Data.Text as T (Text, pack, append)
+import qualified Data.Text.Lazy as TL (unpack)
+import           Data.YAML (ToYAML(..), mapping, (.=))
 import           GHC.Generics
 import           Text.Pretty.Simple (pShow)
-import qualified Data.Text.Lazy as TL (unpack)
 
-import Text.Pandoc.Builder
-import CoInSyDe.Internal.Docs
+import           Text.Pandoc.Builder
+import           CoInSyDe.Internal.Docs
 
 -------------------------------------------------------------
 
@@ -42,45 +39,17 @@ import CoInSyDe.Internal.Docs
 type Id = Text 
 
 -- | Dictionary type used throughout CoInSyDe
-newtype Map t = Map { getMap :: M.HashMap Id t } deriving (Show, Read, Generic)
-
-instance Functor Map where
-  fmap f  = Map . fmap f . getMap
-
-instance Foldable Map where
-  foldr f i = M.foldr f i . getMap
-
-instance Traversable Map where
-  traverse f x = Map <$> traverse f (getMap x)
+type Map t =  M.HashMap Id t
 
 instance Binary v => Binary (Map v) where
-  put = put . M.toList . getMap
-  get = (Map . M.fromList) <$> get
+  put = put . M.toList
+  get = M.fromList <$> get
 
-mkMap :: [(Id,t)] -> Map t
-mkMap = Map . M.fromList
-
-mkMapWith f = Map . M.fromListWith f
-
-emptyMap  = Map M.empty
-liftMap f = Map . f . getMap
-liftMap2 f (Map a) (Map b) = Map (f a b)
-
-isEmpty = M.null . getMap
-ids = M.keys . getMap
-entries = M.elems . getMap
-idEntries = M.toList . getMap
-
-insertWith f k v = liftMap (M.insertWith f k v)
-union = liftMap2 M.union
-
--- | Genric 'Map' selector. Throws a more meaningful error message than the default
--- one.
-(!?!) :: Show t => Map t -> Id -> t
-(!?!) d k = fromMaybe (error $ dictErr k d) (M.lookup k $ getMap d)
+instance ToYAML v => ToYAML (Map v) where
+  toYAML = mapping . map (\(k,v) -> k .= toYAML v) . M.toList
 
 (!?) :: Show t => Map t -> Id -> Maybe t
-(!?) d k =  M.lookup k $ getMap d
+(!?) d k =  M.lookup k d
 
 -------------------------------------------------------------
 
@@ -104,42 +73,42 @@ type MapH t = Map (t,[Info])
 -- | Dictionary entry insertion policy
 data Policy = Keep | Replace deriving (Show, Eq)
 
-infixl 9 !*, !^, !?!
+infixl 9 !*, !^
 
 -- | 'MapH' selector. Returs the entry with a given 'Id'.
 (!*) :: (Show t) => MapH t -> Id -> Maybe t
 (!*) d k = fst <$> d !? k
 
 -- | 'MapH' selector. Returs the history for the entry with a given 'Id'.
-(!^) :: (Show t) => MapH t -> Id -> [Info]
-(!^) d k = snd $ d !?! k
+(!^) :: (Show t) => MapH t -> Id -> Maybe [Info]
+(!^) d k = snd <$> d !? k
 
 -- | Makes a 'MapH' from a list of entries with their history.
-mkDict :: [(Id, t, [Info])] -> MapH t
-mkDict = Map . M.fromList . map (\(i,c,h) -> (i,(c,h)))
+mkDb :: [(Id, t, [Info])] -> MapH t
+mkDb = M.fromList . map (\(i,c,h) -> (i,(c,h)))
 
-mapDict f = fmap (\(e,i) -> (f e, i))
+mapDb f = fmap (\(e,i) -> (f e, i))
    
 -- | Inserts an entry into a 'MapH'. Depending on the 'Policy', if the entry exists:
 --
 -- * 'Replace' : replaces it and updates the history as the \"newest\" entry.
 -- * 'Keep' : ignores it and keeps the existing one, and updates the history as the
 --            \"oldest\" entry.
-dictUpdate :: Policy -> Id -> t -> Info -> MapH t -> MapH t
-dictUpdate Replace name c info = liftMap (M.insertWith fReplace name (c,[info]))
-dictUpdate Keep    name c info = liftMap (M.insertWith fKeep name (c,[info]))
+dbUpdate :: Policy -> Id -> t -> Info -> MapH t -> MapH t
+dbUpdate Replace name c info = M.insertWith fReplace name (c,[info])
+dbUpdate Keep    name c info = M.insertWith fKeep name (c,[info])
 
 fReplace (a,newh) (_,oldh) = (a,newh++oldh)
 fKeep    (_,newh) (a,oldh) = (a,oldh++newh)
 
-dictUnion :: MapH t -> MapH t -> MapH t
-dictUnion = liftMap2 (M.unionWithKey err)
+dbUnion :: MapH t -> MapH t -> MapH t
+dbUnion = M.unionWithKey err
   where
     err k (_,i1) (_,i2) = error $ "Found two components with the same ID " ++ show k
                           ++ " defined at:\n+++ " ++ prettyInfo (head i1)
                           ++ "\n+++ " ++ prettyInfo (head i2)
 
 dictErr k d = "ID " ++ show k ++ " does not exist in the database with elements: "
-              ++ (show $ ids d)
+              ++ (show $ M.keys d)
               -- ++ (TL.unpack $ pShow d)
 

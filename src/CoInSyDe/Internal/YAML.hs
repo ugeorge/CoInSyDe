@@ -1,4 +1,5 @@
-{-# LANGUAGE DeriveGeneric, FlexibleInstances, OverloadedStrings #-}
+{-# LANGUAGE DeriveGeneric, OverloadedStrings #-}
+{-# LANGUAGE FlexibleInstances, MultiParamTypeClasses #-}
 module CoInSyDe.Internal.YAML (
   ToYAML(..),
   YDoc(..), YMap, YNode, YPos, YParse,
@@ -9,16 +10,23 @@ module CoInSyDe.Internal.YAML (
   ) where
 
 import           Control.Monad (liftM,when)
+import qualified Data.Aeson as JSON
+import           Data.Binary
 import qualified Data.ByteString.Lazy as S
 import qualified Data.ByteString.Lazy.Char8 as SC (unpack)
+import           Data.Default
+import qualified Data.HashMap.Strict as H
+import qualified Data.Map.Strict as M
 import           Data.Maybe
-import           Data.Binary
+import           Data.Scientific (fromFloatDigits)
 import           Data.Text (Text,append)
 import           Data.Text.Encoding (encodeUtf8)
+-- import qualified Data.Vector as V
 import           Data.Word (Word8)
 import           Data.YAML
 import           Data.YAML.Event (Tag)
 import           System.Exit
+import           Text.Ginger.GVal
 
 -- | Convenience wrapper for a Yaml document, for nicely printing out
 -- parser errors.
@@ -49,7 +57,6 @@ getPos (Anchor loc _ _) = return loc
 
 getLineAndColumn :: YMap -> (Int,Int)
 getLineAndColumn (_, Mapping loc _ _) = (posLine loc, posColumn loc)
-
 
 traverseMap f (n,mp) = withMap (show n ++ " node") f mp 
 
@@ -164,13 +171,35 @@ prettyYNode = SC.unpack . encode1
 --   readsPrec p str = [ (makeNode x, y) | (x, y) <- readsPrec p str ]
 --     where makeNode = either (error . show) id . decode1 . packChars
 
---- TODO: make Node an instance of Ginger.GVal, e.g.
--- -- | Convert Aeson 'Value's to 'GVal's over an arbitrary host monad. Because
--- -- JSON cannot represent functions, this conversion will never produce a
--- -- 'Function'. Further, the 'ToJSON' instance for such a 'GVal' will always
--- -- produce the exact 'Value' that was use to construct the it.
--- instance ToGVal m JSON.Value where
---     toGVal j = (rawJSONToGVal j) { asJSON = Just j }
+instance Show a => ToGVal m (Node a) where
+    toGVal = yamlToVal
+
+-- ynodeToText (Scalar _ (SStr t))   = t
+-- ynodeToText n = error $ "YAML node is not text. Cannot convert to JSON!\n" ++ show n
+-- ynodeToJson (Scalar _ SNull)      = JSON.Null
+-- ynodeToJson (Scalar _ (SBool b))  = JSON.Bool b
+-- ynodeToJson (Scalar _ (SFloat d)) = JSON.Number (fromFloatDigits d)
+-- ynodeToJson (Scalar _ (SInt i))   = JSON.Number (scientific i 0)
+-- ynodeToJson (Scalar _ (SStr t))   = JSON.String t
+-- ynodeToJson (Mapping _ _ m)     = JSON.Object
+--   $ H.fromList $ map (\(k,v) -> (ynodeToText k, ynodeToJson v)) $ M.toList m
+-- ynodeToJson (Sequence _ _ lst)    = JSON.Array $ V.fromList $ map ynodeToJson lst
+-- ynodeToJson (Anchor _ _ _)        = JSON.Null
+
+ynodeToText (Scalar _ (SStr t))   = t
+ynodeToText n = error $ "YAML node is not text. Cannot convert to GVal!\n" ++ show n
+yamlToVal :: Show a => Node a -> GVal m
+yamlToVal (Scalar _ SNull)      = def
+yamlToVal (Scalar _ (SBool b))  = toGVal b
+yamlToVal (Scalar _ (SFloat d)) = toGVal (fromFloatDigits d)
+yamlToVal (Scalar _ (SInt i))   = toGVal i
+yamlToVal (Scalar _ (SStr t))   = toGVal t
+yamlToVal (Mapping _ _ m)       = toGVal $
+  H.fromList $ map (\(k,v) -> (ynodeToText k, v)) $ M.toList m
+yamlToVal (Sequence _ _ lst)    = toGVal lst
+yamlToVal (Anchor _ _ _)        = def
+
+
 
 -- rawJSONToGVal :: JSON.Value -> GVal m
 -- rawJSONToGVal (JSON.Number n) = toGVal n

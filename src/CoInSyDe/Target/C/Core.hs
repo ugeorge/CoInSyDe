@@ -15,9 +15,11 @@
 module CoInSyDe.Target.C.Core where
 
 import Data.Binary (Binary)
-import Data.List (sortOn)
+import Data.HashMap.Strict as M hiding (map,filter,foldr, null)
 import Data.Text (Text, append, pack, unpack, breakOn, tail)
 import Data.Text.Read (decimal)
+import Data.Maybe (fromMaybe)
+import Data.YAML
 import GHC.Generics (Generic)
 import Text.Pandoc.Builder hiding (Target)
 
@@ -32,8 +34,14 @@ import CoInSyDe.Internal.YAML
 data C = C
 
 data Kind = LocVar | GlobVar | InArg Int | OutArg Int | RetArg
-          deriving (Show, Eq, Ord, Generic)
-
+          deriving (Eq, Ord, Generic)
+instance Show Kind where
+  show LocVar = "local variable"
+  show GlobVar = "global variable"
+  show RetArg = "return argument"
+  show (InArg _) = "input argument"
+  show (OutArg _) = "output argument"
+  
 -----------------------------------------------------------------
 instance Target C where
   data Type C
@@ -41,8 +49,8 @@ instance Target C where
     |  EnumTy {tyId :: Id, tyName :: Text, enumVals  :: [(Id, Maybe Text)]}
     | StrucTy {tyId :: Id, tyName :: Text, sEntries  :: [(Id, Type C)]}
     |   ArrTy {tyId :: Id, tyName :: Text, arrBaseTy :: Type C,
-               arrSize :: Either Int Id}
-    | Foreign {tyId :: Id, tyName :: Text, oCallPrefix :: Text, oBindPrefix :: Text,
+               arrSize :: Either Id Int}
+    | Foreign {tyId :: Id, tyName :: Text, inUsage :: Text, outUsage :: Text,
                tyRequ :: [Requ C]}
     |    NoTy {tyName :: Text} -- ^ will always be void
     deriving (Show, Generic)
@@ -71,25 +79,25 @@ instance Target C where
       "array"  -> do sNum <- node @? "size"
                      sVar <- node @? "sizeFrom"
                      size <- case (sNum,sVar) of
-                               (Just s,Nothing) -> return $ Left s
-                               (Nothing,Just i) -> return $ Right i
+                               (Just s,Nothing) -> return $ Right s
+                               (Nothing,Just i) -> return $ Left i
                                _ -> yamlError node "Cannot deduce array size!"
                      bty  <- (tyLib !*) <$> (node @! "baseType") >>= maybe
                              (yamlError node "Array base type not loaded!") return
                      return $ ArrTy idx (tyName bty) bty size
                      
-      "foreign"-> do cprefix <- node @! "callPrefix"
-                     bprefix <- node @! "bindPrefix"
-                     requs   <- node |= "requirement" >>= mapM mkRequ
-                     return $ Foreign idx name cprefix bprefix requs
+      "foreign"-> do ouse  <- node @? "outUsage" @= ""
+                     iuse  <- node @? "inUsage"  @= ""
+                     requs <- node |= "requirement" >>= mapM mkRequ
+                     return $ Foreign idx name iuse ouse requs
                      
       x -> yamlError node $ "Type class " ++ show x ++ " is not recognized!"
           
-  data Port C = Var {pName :: Id, pKind :: Kind, pTy :: Type C, pVal :: Maybe Text}
+  data Port C = Var { pName :: Id, pKind :: Kind, pTy :: Type C, pVal :: Maybe Text }
               deriving (Show, Generic)
   mkPort tyLib node = do
     name <- node @! "name"
-    kind <- (breakOn ".") <$> node @! "kind"
+    kind <- breakOn "." <$> node @! "kind"
     ty   <- (tyLib !*) <$> (node @! "type") >>=
             maybe (yamlError node "Type not loaded!") return
     val  <- node @? "value"
@@ -100,7 +108,8 @@ instance Target C where
       ("oarg",Right(p,_)) -> return $ Var name (OutArg p) ty val
       ("ret",_)   -> return $ Var name RetArg ty val
       ("var",_)   -> return $ Var name LocVar ty val
-      ("state",_) -> return $ Var name GlobVar ty val
+      ("state",_) -> maybe (yamlError node "State needs to have initial value")
+                     (return . Var name GlobVar ty . Just) val
       x -> yamlError node "Port kind not recognized!"
 
   data Requ C = Include Text deriving (Show, Eq, Generic)
@@ -108,14 +117,43 @@ instance Target C where
 
 -----------------------------------------------------------------
 
+isPrim PrimTy{}     = True
+isPrim _            = False
+isEnum EnumTy{}     = True
+isEnum _            = False
+isStruct StrucTy{}  = True
+isStruct _          = False
+isArray ArrTy{}     = True
+isArray _           = False
+isForeign Foreign{} = True
+isForeign _         = False
+isVoid NoTy{}       = True
+isVoid _            = False
+ 
+isGlobal v = pKind v == GlobVar
+
 instance Binary Kind
 instance Binary (Type C)
 instance Binary (Port C)
 instance Binary (Requ C)
 
-tylink NoTy{} = ilink "#" "void"
-tylink ty     = ilink "ty" (tyId ty)
+instance ToYAML (Type C) where
+  toYAML (PrimTy i n)    = mapping [ "_name" .= n]
+  toYAML (EnumTy i n m)  = mapping [ "_name" .= n, "_val" .= map fst m ]
+  toYAML (StrucTy i n m) = mapping $
+    [ "_name" .= n, "_constructor" .= ("_mk_" `append` n) ]
+    ++ map (\(n,t) ->  n .= toYAML t) m
+  toYAML (ArrTy i n b s) = mapping
+    [ "_name" .= n, "_base" .= toYAML b,  "_size" .= either id (pack . show) s ]
+  toYAML (Foreign i n iu ou r) = mapping [ "_name" .= n  ]
 
+ifToYAML :: Id -> If C -> Node ()
+ifToYAML i (TPort (Var n k t v) u) = mapping $
+  [ "_name" .= n, "_type" .= toYAML t ]  ++
+  [ "_use" .= fromMaybe ("{{" <> i <> "._name" <> "}}") u ] ++
+  maybe [] (\x -> [ "_val" .= x ]) v
+ifToYAML _ (Param n _) = toYAML n
+  
 instance ToDoc (Type C) where
   toDoc _ (PrimTy i n) = plain $ code n <> text ": primitive"
   toDoc _ (EnumTy i n m) = definitionList [
@@ -136,48 +174,6 @@ instance ToDoc (Port C) where
 instance ToDoc (Requ C) where
   toDoc _ (Include r) = plain $ text "include: " <> code r
 
-isPrim PrimTy{}     = True
-isPrim _            = False
-isEnum EnumTy{}     = True
-isEnum _            = False
-isStruct StrucTy{}  = True
-isStruct _          = False
-isArray ArrTy{}     = True
-isArray _           = False
-isForeign Foreign{} = True
-isForeign _         = False
-isVoid NoTy{}       = True
-isVoid _            = False
- 
-isGlobal v = pKind v == GlobVar
-
--- Interface separator. Does a lot of plumbing when it comes to maniputaling the
--- interfaces.
-data IfSeparator = Sep {
-  iarg  :: [Port C], oarg  :: [Port C], args ::[Port C], ret ::  Port C,
-  var :: [Port C], state :: [Port C], param :: [YNode]
-  } deriving (Show)
-categorize ifmap = case ret' of
-  []    -> Right $ Sep iarg oarg args voidret var state param
-  [ret] -> Right $ Sep iarg oarg args ret var state param
-  xs    -> Left  $ "C cannot return more than one argument: " ++ show xs
-  where
-    ifs   = entries ifmap
-    param = [ x | Param x <- ifs ]
-    args  = sortOn (getPos . pKind) [ x | TPort x <- ifs
-                                        , isInArg (pKind x) || isOutArg (pKind x) ]
-    iarg  = [ x | x <- args, isInArg (pKind x) ]
-    oarg  = [ x | x <- args, isOutArg (pKind x) ]
-    var   = [ x | TPort x@(Var _ LocVar _ _) <- ifs ]
-    state = [ x | TPort x@(Var _ GlobVar _ _) <- ifs ]
-    ret'  = [ x | TPort x@(Var _ RetArg _ _) <- ifs ]
-    --------------------------------------------
-    voidret = Var "_out_" RetArg (NoTy "void") Nothing
-    getPos (InArg x)  = x
-    getPos (OutArg x) = x
-    isInArg  (InArg _)  = True
-    isInArg  _          = False
-    isOutArg (OutArg _) = True
-    isOutArg _          = False
-
+tylink NoTy{} = ilink "#" "void"
+tylink ty     = ilink "ty" (tyId ty)
 

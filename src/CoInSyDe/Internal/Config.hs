@@ -114,7 +114,7 @@ data ProjConfig
                , projTops   :: [Text]     -- ^ Top modules
                , projDocs   :: FilePath   -- ^ overrides location of docs dump
                , projCode   :: FilePath   -- ^ Path where code will be dumped
-               , projObj    :: FilePath   -- ^ Path for obdump files
+               , projObj    :: FilePath   -- ^ Path for objdump files
                } deriving (Show)
         
 loadProjConfigs :: SuiteConfig -> YDoc -> IO [ProjConfig]      

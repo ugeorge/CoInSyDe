@@ -52,23 +52,26 @@ data Proj = Proj
   } deriving (Show)
 
 emptyProj :: Id -> Proj
-emptyProj top = Proj greet top [] S.empty S.empty emptyMap emptyMap emptyMap emptyMap
+emptyProj top = Proj greet top [] S.empty S.empty M.empty M.empty M.empty M.empty
 
 greet = pack "// Generated with CoInSyDe : Code Synthesizer for System Design //"
 
 resolveIncludes :: Proj -> [Id]
 resolveIncludes proj = L.map ((\(i,_,_) -> i) . getNode) $ G.topSort graph
   where (graph,getNode,_)  = graphFromEdges $ L.map (\(i,(h,d)) -> (i,h,d))
-                             $ idEntries $ includes proj
+                             $ M.toList $ includes proj
 
 getFunDecls :: Proj -> [Id]
 getFunDecls = S.toList . funDecls
 
+-- getFunDefs :: Proj -> [Id]
+-- getFunDefs proj = filter (=/ topModule proj) $ M.keys $ projComps proj
+
 getTypeDecls :: Proj -> [Type C]
-getTypeDecls = entries . typeDecls
+getTypeDecls = M.elems . typeDecls
 
 getGlobVars :: Proj -> [Port C]
-getGlobVars = entries . globVars
+getGlobVars = M.elems . globVars
 
 --------------------------------------------------------------------
 
@@ -94,7 +97,7 @@ projBuilder db n = case db !? n of
       NvComp{} -> return ()
 
     let newEntry = entry { cpIfs = newPorts }
-    modify $ \s -> s { projComps = dictUpdate Keep n newEntry info $ projComps s }
+    modify $ \s -> s { projComps = dbUpdate Keep n newEntry info $ projComps s }
     popCallStack
     
   Nothing -> throwError $ "Referenced component " ++ show n ++ " does not exist!"
@@ -108,22 +111,22 @@ updateRequirements rlist = unless (L.null rlist) $ do
       depens = L.map ((:[]) . snd) (L.tail idlist) ++ [[]] -- shift-left the hashes
       paired = L.zipWith (\(i,h) d -> (i,h,d)) idlist depens
       rule (i,h,d) = M.insertWith (\(_,nd) (h',md) -> (h',nd++md)) i (h,d)
-  modify $ \s -> s { includes = L.foldr (liftMap . rule) rgraph paired }
+  modify $ \s -> s { includes = L.foldr rule rgraph paired }
 
 -- modifies variable name and updates type declarations, namespace, global
 -- variable space and requirements
 traversePort :: If C -> ProjBuilder (If C)
-traversePort (TPort p) = do
+traversePort (TPort p u) = do
   uname <- getUniqueName (pName p)
   let newp = p { pName = uname }
       ty   = pTy p
   when (isGlobal p) $
-    modify $ \s -> s { globVars = liftMap (M.insert uname newp) $ globVars s }
+    modify $ \s -> s { globVars = M.insert uname newp $ globVars s }
   when (isEnum ty || isStruct ty) $
-    modify $ \s -> s { typeDecls = liftMap (M.insert (tyId ty) ty) $ typeDecls s }
+    modify $ \s -> s { typeDecls = M.insert (tyId ty) ty $ typeDecls s }
   when (isForeign ty) $
     updateRequirements $ tyRequ ty
-  return $ TPort newp
+  return $ TPort newp u
 traversePort p = return p
   
 -----------------------------------------------
@@ -133,10 +136,10 @@ withFreshNamespace :: Id -> ProjBuilder () -> ProjBuilder ()
 withFreshNamespace ref builder = do
   ns <- namespace <$> get
   gl <- globVars <$> get
-  modify $ \s -> s { namespace = M.keysSet $ getMap gl }
+  modify $ \s -> s { namespace = M.keysSet gl }
   builder
   gl <- globVars <$> get
-  modify $ \s -> s { namespace = ns `S.union` M.keysSet (getMap gl) }
+  modify $ \s -> s { namespace = ns `S.union` M.keysSet gl }
   modify $ \s -> s { funDecls = S.insert ref $ funDecls s }
 
 getUniqueName :: Id -> ProjBuilder Id
@@ -203,29 +206,29 @@ dotBuilder standalone db n = case db !? n of
     
     maps <- case cp of
       NvComp{} -> return M.empty
-      TmComp{} -> L.foldr1 M.union <$> forM (entries $ cpRefs cp)
+      TmComp{} -> L.foldr1 M.union <$> forM (M.elems $ cpRefs cp)
                   (\ref -> dotBuilder (not $ refInline ref) db (refId ref))
       
-    ids <- forM (idEntries $ cpIfs cp) $ \(i,p) -> case p of
-      TPort (Var n (InArg _) _ _) -> liftM ((,) i)
+    ids <- forM (M.toList $ cpIfs cp) $ \(i,p) -> case p of
+      TPort (Var n (InArg _) _ _) _ -> liftM ((,) i)
         $ node [("shape","invtriangle"),("fixedsize","shape"),("label",unpack n)]
-      TPort (Var n (OutArg _) _ _) -> liftM ((,) i)
+      TPort (Var n (OutArg _) _ _) _ -> liftM ((,) i)
         $ node [("shape","triangle"),("fixedsize","shape"),("label",unpack n)]
-      TPort (Var n GlobVar _ _) -> liftM ((,) i)
+      TPort (Var n GlobVar _ _) _ -> liftM ((,) i)
         $ node [("shape","doubleoctagon"),("label",unpack n)]
-      TPort (Var n LocVar _ _) -> liftM ((,) i)
+      TPort (Var n LocVar _ _) _ -> liftM ((,) i)
         $ node [("shape","ellipse"),("label",unpack n)]
-      TPort (Var n RetArg _ _) -> liftM ((,) i)
+      TPort (Var n RetArg _ _) _ -> liftM ((,) i)
         $ node [("shape","triangle"),("fixedsize","shape"),("label",unpack n)]
-      Param _ -> liftM ((,) i)
+      Param _ _ -> liftM ((,) i)
         $ node [("shape","parallelogram"),("label",unpack i)]
     let pmap = M.fromList ids
 
     case cp of
       NvComp{} -> return ()
-      TmComp{} -> forM_ (idEntries $ cpRefs cp) $ \(ph,ref) ->
-        forM_ (idEntries $ refBinds ref) $ \(repl,with) ->
-        case (M.lookup with pmap, M.lookup repl (maps ! (refId ref))) of
+      TmComp{} -> forM_ (M.toList $ cpRefs cp) $ \(ph,ref) ->
+        forM_ (refBinds ref) $ \(repl, with, _) ->
+        case (M.lookup with pmap, M.lookup repl (maps ! refId ref)) of
           (Just src, Just dst) -> src .->. dst 
           _ -> return ()
           -- _ -> return $ "[WARNING] connection " ++ show (cpName cp) ++ ":"

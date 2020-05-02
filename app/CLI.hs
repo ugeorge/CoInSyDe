@@ -26,8 +26,8 @@ import Data.Maybe
 import Text.Pretty.Simple
 import Data.Text (unpack)
 -- import Data.List
--- import Data.Text.Prettyprint.Doc
--- import Data.Text.Prettyprint.Doc.Render.Text
+import Data.Text.Prettyprint.Doc
+import Data.Text.Prettyprint.Doc.Render.Text
 
 import CoInSyDe.Internal.Config
 import CoInSyDe.Internal.Docs
@@ -37,6 +37,7 @@ import CoInSyDe.Internal.YAML (YNode)
 
 import CoInSyDe.Target.C.Core (C(..))
 import CoInSyDe.Target.C.Builder
+import CoInSyDe.Target.C.Chain
 
 data CLIConfig = CLIConfig { force   :: Bool
                            , docs    :: Maybe String
@@ -95,7 +96,10 @@ main = do
           writeFile (projDocs conf </> ("Graph-" ++ pName) <.> "dot") $
             drawDotGraph p
 
-        putStrLn "hallo"
+        forM_ proj $ \p -> do
+          dumpCode gconf conf p $ generateCode defaultLayoutOptions p
+          
+        putStrLn $ "C code generated in " ++ projCode conf
 
       other -> putStrLn $ "[WARNING] CoInSyDe does not support target family "
                ++ show other ++ ". Ignoring project " ++ show (projName conf) ++ "!"
@@ -118,8 +122,23 @@ dumpLibraryDoc cliconf gconf conf filename title content = do
                        otherOpt ++ ["--toc", "--from=json", "--to=" ++ format,
                                     "--output=" ++ docFile] ++ [jsonFile])
   return ()
-       
-  
+
+dumpCode :: SuiteConfig -> ProjConfig -> Proj -> Doc () -> IO ()
+dumpCode gconf conf proj code = do
+  -- create dump path
+  createDirectoryIfMissing True (projCode conf)
+  -- try to copy existing declared dependencies
+  forM_ (resolveIncludes proj) $ \f -> do
+    let depPath = targetLibPath gconf </> normalise (unpack f)
+        trgPath = projCode conf </> depPath
+    isDepFile <- doesFileExist depPath
+    when isDepFile $ do
+      createDirectoryIfMissing True (takeDirectory trgPath)
+      copyFile depPath trgPath
+  -- dump the code
+  withFile (projCode conf </> (unpack $ topModule proj) <.> "c") WriteMode $
+    \h -> renderIO h $ layoutPretty defaultLayoutOptions code
+
 --   -- check if libraries already loaded
 --   let tyObjPathath = objPath cmd </> name cmd <.> target cmd <.> "type" <.> "objdump"
 --       cpObjPathath = objPath cmd </> name cmd <.> target cmd <.> "component" <.> "objdump"

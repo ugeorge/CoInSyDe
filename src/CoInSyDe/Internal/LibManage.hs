@@ -70,6 +70,7 @@ import           Control.Monad (foldM,liftM)
 import           Data.Binary as Bin
 import qualified Data.ByteString.Lazy as BL
 import           Data.Function (on)
+import qualified Data.HashMap.Strict as M
 import           Data.List hiding (union)
 import           Data.Text as T (Text,pack,splitOn)
 import           Data.Text.Lazy.Encoding (encodeUtf8)
@@ -152,18 +153,18 @@ loadLibs :: Target l
          -> IO (MapH (Type l), MapH (Comp l))
 loadLibs _ conf [lty,lnv,ltm,lpt] [tys,nvs,tms,pts] = do
   tyLib <- if lty
-           then parseYDocs makeTyLibs emptyMap tys
+           then parseYDocs makeTyLibs M.empty tys
            else loadObj conf (llWhat tys)
   nvLib <- if lty || lnv
-           then parseYDocs (makeCpLibs tyLib) emptyMap nvs
+           then parseYDocs (makeCpLibs tyLib) M.empty nvs
            else loadObj conf (llWhat nvs)
   tmLib <- if lty || ltm
-           then parseYDocs (makeCpLibs tyLib) emptyMap tms
+           then parseYDocs (makeCpLibs tyLib) M.empty tms
            else loadObj conf (llWhat tms)
   ptLib <- if lty || ltm || lpt
            then parseYDocs (makeCpLibs tyLib) tmLib pts
            else loadObj conf (llWhat pts)
-  return (tyLib, nvLib `union` ptLib)
+  return (tyLib, nvLib `M.union` ptLib)
   where
     load parser what l p = readYDoc p >>= \doc -> parseYDoc doc $ parser what l doc
     parseYDocs parser lib (LL what paths) = do
@@ -177,7 +178,7 @@ makeTyLibs what lib doc  = (yamlRoot doc |= pack what) >>= foldM load lib
           name  <- node @! "name"
           entry <- mkType lib node
           info  <- mkInfo doc node
-          return $ dictUpdate Replace name entry info lib 
+          return $ dbUpdate Replace name entry info lib 
 
 makeCpLibs :: Target l => MapH (Type l) -> String -> MapH (Comp l) -> YDoc
            -> YParse (MapH (Comp l))
@@ -189,7 +190,7 @@ makeCpLibs tyLib what lib doc  = (yamlRoot doc |= pack what) >>= foldM load lib
             "native"   -> (,) Keep    <$> mkNative tyLib node
             "template" -> (,) Keep    <$> mkTemplate tyLib node
             "pattern"  -> (,) Replace <$> mkPattern tyLib lib node
-          return $ dictUpdate policy name entry info lib 
+          return $ dbUpdate policy name entry info lib 
 
 -- | Gets parser information about a node
 mkInfo :: YDoc -> YMap -> YParse Info

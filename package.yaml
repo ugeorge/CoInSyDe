@@ -28,7 +28,8 @@ description:         Please see the README on GitHub at <https://github.com/gith
 dependencies:
 - base >= 4.7 && < 5
 # data types
-- aeson        #! needed for ginger and pandoc-types
+- aeson        #! needed for pandoc-types
+- scientific   #! needed for ginger
 - data-default #! needed for ginger
 - pandoc-types
 - HsYAML
