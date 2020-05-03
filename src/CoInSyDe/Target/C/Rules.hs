@@ -4,10 +4,11 @@ module CoInSyDe.Target.C.Rules  where
 import           Control.Arrow ((&&&))
 import           Control.Monad.State.Lazy (get)
 import           Data.ByteString.Lazy as S (fromStrict)
+import           Data.Either
 import qualified Data.HashMap.Strict as M
 import           Data.List (sortOn)
 import           Data.Maybe
-import           Data.Text as T (Text,append,null,intercalate,pack)
+import           Data.Text as T (Text,append,null,intercalate,pack,lines)
 import           Data.Text.Encoding (encodeUtf8)
 import           Data.Text.Prettyprint.Doc
 import           Data.Text.Prettyprint.Doc.Render.Text
@@ -191,45 +192,44 @@ pVarInit (Var n k ty v)         =                -- type a = value
 -- +=========+=======+========+========+========+=========+
 -- | void    | X     | X      | ""     | X      | X       |
 -- +---------+-------+--------+--------+--------+---------+
--- | prim    | a     | &a     | a      | X      | X       |
+-- | prim    | a     | &a     | a      | a      | a       |
 -- +---------+-------+--------+--------+--------+---------+
--- | enum    | a     | &a     | a      | X      | X       |
+-- | enum    | a     | &a     | a      | a      | a       |
 -- +---------+-------+--------+--------+--------+---------+
--- | struct  | a?    | &a?    | a?     | X      | X       |
+-- | struct  | a?    | &a?    | a?     | a?     | a?      |
 -- +---------+-------+--------+--------+--------+---------+
--- | array   | a?    | a?     | X      | X      | X       |
+-- | array   | a?    | a?     | X      | a?     | a?      |
 -- +---------+-------+--------+--------+--------+---------+
--- | foreign | a?    | a?     | a?     | X      | X       |
+-- | foreign | a?    | a?     | a?     | a?     | a?      |
 -- +---------+-------+--------+--------+--------+---------+
 --
 -- Nore: @?@ denotes that usage will be replaced with a Ginger template which will
 -- generate the actual code. This template is passed through a binding, or, in the
 -- case of foreign types, in the definition.
 pVarBind :: Port C -> CGen (Doc ())
-pVarBind (Var n LocVar ty v)    = varError "bind from argument" n LocVar (tyId ty) 
-pVarBind (Var n GlobVar ty v)   = varError "bind from argument" n GlobVar (tyId ty) 
+-- pVarBind (Var n LocVar ty v)    = varError "bind from argument" n LocVar (tyId ty) 
+-- pVarBind (Var n GlobVar ty v)   = varError "bind from argument" n GlobVar (tyId ty) 
 pVarBind (Var n k (NoTy tyn) v) = case k of
   RetArg   -> return emptyDoc                               -- ""
   _        -> varError "bind from argument" n k "void"      -- !!! 
 pVarBind (Var n k (PrimTy tyId tyn) v) = case k of          -- ¤¤¤ PRIMITIVE ¤¤¤
-  InArg _  -> return $ pretty n                             -- "a" 
   OutArg _ -> return $ "&" <> pretty n                      -- "&a" 
   RetArg   -> return $ pretty n <> space                    -- "a "
+  _        -> return $ pretty n                             -- "a" 
 pVarBind (Var n k (EnumTy tyId tyn _) v) = case k of        -- ¤¤ ENUMERATION ¤¤¤
-  InArg _  -> return $ pretty n                             -- "a"  
   OutArg _ -> return $ "&" <> pretty n                      -- "&a" 
   RetArg   -> return $ pretty n <> space                    -- "a "
+  _        -> return $ pretty n                             -- "a"  
 pVarBind (Var n k (StrucTy tyId tyn _) v) = case k of       -- ¤¤¤ STRUCTURE ¤¤¤¤
-  InArg _  -> return $ pretty n                             -- "a"  
   OutArg _ -> return $ "&" <> pretty n                      -- "&a" 
   RetArg   -> return $ pretty n <> space                    -- "a "
+  _        -> return $ pretty n                             -- "a"  
 pVarBind (Var n k (ArrTy tyId tyn _ s) v) = case k of       -- ¤¤¤¤¤ ARRAY ¤¤¤¤¤¤
-  InArg _  -> return $ pretty n                             -- a  
-  OutArg _ -> return $ pretty n                             -- a 
   RetArg   -> varError "bind from argument" n k tyId        -- !!!
+  _        -> return $ pretty n                             -- a  
 pVarBind (Var n k (Foreign tyId tyn iu ou _) v) = case k of -- ¤¤¤¤ FOREIGN ¤¤¤¤¤
   OutArg _ -> return $ pretty $ if T.null ou then n else ou -- "a?"
-  RetArg   -> return $ pretty (if T.null ou then n else ou) <> space
+  RetArg   -> return $ pretty (if T.null iu then n else iu) <> space
   _        -> return $ pretty $ if T.null iu then n else iu -- a? 
 
 -- | Generates base names for code template usage. Implements LUT:
@@ -289,11 +289,11 @@ pMainDef globSts = do
   sif  <- categorize (cpIfs cp)
   sanity sif cp
   let varPorts = globSts ++ map snd (var sif ++ maybeToList (ret sif))
-  vars <- mapM pVarInit varPorts
+  vars <- mapM (fmap (<>semi) . pVarInit) varPorts
   retS <- maybe (return emptyDoc)
           (fmap (\a -> "return" <+> pretty a <> semi) . pVarUse) (snd <$> ret sif)
   code <- pFunCode (cpIfs cp)
-  return $ header <+> cBraces (vars ++ [code] ++ [retS])
+  return $ header <+> cBraces (vars ++ code ++ [retS])
   where
     header = "int main(int argc, char ** argv)"
     sanity _ NvComp{} = genError "A native C function cannot be top module!"
@@ -310,74 +310,103 @@ pFunDef = do
   retA <- pVarDecl $ maybe voidVar snd (ret sif)
   let header = retA <+> pretty (cpName cp) <+> sepArg args
   ---- body ----
-  vars <- mapM (pVarDecl . snd) (maybeToList (ret sif) ++ var sif)
+  vars <- mapM (fmap (<>semi) . pVarDecl . snd) (maybeToList (ret sif) ++ var sif)
   retS <- maybe (return emptyDoc)
           (fmap (\a -> "return" <+> pretty a <> semi) . pVarUse) (snd <$> ret sif)
   body <- case cp of
-            TmComp{} -> do
-              code <- pFunCode (cpIfs cp)
-              return $ vars ++ [code] ++ [retS]
+            TmComp{} -> do code <- pFunCode (cpIfs cp)
+                           return $ vars ++ code ++ [retS]
             NvComp{} -> maybe
                         (genError "Cannot expand native code which was not given!")
                         (return . (:[]) . pretty) (cpCode cp)
   return $ header <+> cBraces body
 
-pFunCode :: IfMap C -> CGen (Doc ())
+pFunCode :: IfMap C -> CGen [Doc ()]
 pFunCode boundIfs = do
+  let msg = "... during interface rebinding in function code expantion\n"
   cp     <- getCp
-  info   <- getInfo
   layout <- layoutOpts <$> get
   st     <- get
   let scopedIfs  = boundIfs `M.union` cpIfs cp
       dictionary = M.mapWithKey ifToYAML scopedIfs
-      genFun n tplArgs = if rInline
-        then generator pFunCode <$> updatedBinds
-        else generator (pFunCall inst) <$> updatedBinds
-        where inst@(Ref rId rInline rBinds) = (cpRefs cp) M.! n
-              updatedBinds  = mergeArgBinds tplArgs rBinds
-              generator f b = spawnGen st rId (f $ updateOnBind scopedIfs b)
+      genFun n tplArgs
+        | isNothing inst  = Left $ "Did not find placeholder " ++ show n ++ "!"
+        | isLeft newBinds = Left $ msg ++ fromLeft "" newBinds
+        | rInline         = generator pFunCode <$> newBinds
+        | otherwise       = generator pFunCall <$> newBinds
+        where inst = cpRefs cp !? n
+              (Ref rId rInline rBinds) = fromJust inst
+              newBinds      = updateOnBind scopedIfs =<< mergeArgBinds tplArgs rBinds
+              generator f b = spawnGen st rId (f b)
               
-  let context = mkGingerContext (head info) dictionary $
-        \n a -> (renderStrict . removeTrailingWhitespace . layoutPretty layout)
-                <$> genFun n a
+  let phFun :: Text -> [Text] -> Either String Text
+      phFun n args = renderStrict . removeTrailingWhitespace .
+                     layoutPretty layout . align . vsep <$> genFun n args
+      context = mkGingerContext (cpTpl cp) dictionary phFun
    
-  code <- fromTemplate context (snd $ cpTpl cp)
-  return $ pretty code
+  code <- fromTemplate context $ cpTpl cp
+  return $ map pretty $ T.lines code
+
+pFunCall :: IfMap C -> CGen [Doc ()]
+pFunCall reboundParentIfs = do
+  cp    <- getCp
+  (retId,argsIds) <- ((fmap fst . ret) &&& (map fst . args)) <$> categorize (cpIfs cp)
+  bRet  <- maybe (return (nullId,TPort voidVar Nothing)) getBoundIf retId >>= usage
+  bArgs <- mapM getBoundIf argsIds >>= mapM usage
+  let template   = ysrcFromText $ renderStrict $ layoutCompact
+                   $ bRet <> pretty (cpName cp) <> sepArg bArgs
+      dictionary = M.mapWithKey ifToYAML reboundParentIfs
+      context    = mkGingerContext template dictionary (\_ _ -> Right "")
+  text <- fromTemplate context template :: CGen Text
+  return [pretty text]
+  where
+    getBoundIf i = either
+                   (genError . (++) "... during instanciation of function call\n")
+                   (return . (,) i) $ reboundParentIfs !~ i
+    usage (_,TPort x u) = maybe (pVarBind x) (return . pretty) u 
+    usage (i,Param _ u) = return $ maybe (braces $ braces $ pretty i) pretty u 
+
 
 -- for bindings I am building a template macro first
-pFunCall :: Instance -> IfMap C -> CGen (Doc ())
-pFunCall parentInst parentIfs = do
-  cp    <- getCp
-  info  <- getInfo
-  (retId,argsIds) <- ((fmap fst . ret) &&& (map fst . args)) <$> categorize (cpIfs cp)
-  let bIfs  = updateOnBind parentIfs (refBinds parentInst)
-  bArgs <- mapM (\i -> usage i $ bIfs M.! i) argsIds
-  bRet  <- maybe (usage nullId $ TPort voidVar Nothing)
-                (\i -> usage i $ bIfs M.! i) retId
-  let template   = bRet <> pretty (cpName cp) <> sepArg bArgs
-      dictionary = M.mapWithKey ifToYAML parentIfs
-      context    = mkGingerContext (head info) dictionary (\_ _ -> Right "")
-  text <- fromTemplate context (renderStrict $ layoutCompact template) :: CGen Text
-  return $ pretty text
-  where
-    usage _ (TPort x u) = maybe (pVarBind x) (return . pretty) u 
-    usage i (Param _ u) = return $ maybe (braces $ braces $ pretty i) pretty u 
+-- pFunCall :: Instance -> IfMap C -> CGen (Doc ())
+-- pFunCall parentInst parentIfs = do
+--   let errmsg = "... during interface rebinding in instanciating function call\n"
+--   cp    <- getCp
+--   (retId,argsIds) <- ((fmap fst . ret) &&& (map fst . args)) <$> categorize (cpIfs cp)
+--   bIfs  <- either (genError . (++) errmsg) return
+--            $ updateOnBind parentIfs (refBinds parentInst)
+--   bArgs <- mapM (\i -> usage i $ bIfs M.! i) argsIds
+--   bRet  <- maybe (usage nullId $ TPort voidVar Nothing)
+--                 (\i -> usage i $ bIfs M.! i) retId
+--   let template   = ysrcFromText $ renderStrict $ layoutCompact
+--                    $ bRet <> pretty (cpName cp) <> sepArg bArgs
+--       dictionary = M.mapWithKey ifToYAML parentIfs
+--       context    = mkGingerContext template dictionary (\_ _ -> Right "")
+--   text <- fromTemplate context template :: CGen Text
+--   return $ pretty text
+--   where
+--     usage _ (TPort x u) = maybe (pVarBind x) (return . pretty) u 
+--     usage i (Param _ u) = return $ maybe (braces $ braces $ pretty i) pretty u 
 
 ----------------------------------------------------------------------
 
-mergeArgBinds :: [Text] -> [Binding] -> Either Text [Binding]
+mergeArgBinds :: [Text] -> [Binding] -> Either String [Binding]
 mergeArgBinds targ binds =
-  let (errs, nBind) = ( concatMap (either (:[]) (const [])) $ decodeBind targ
-                      , concatMap (either (const []) (:[])) $ decodeBind targ )
+  let (errs, nBind) = partitionEithers $ map (\t -> decodeBind t $ getYDoc t) targ
   in case errs of
     [] -> Right $ toBind $ toMap nBind `M.union` toMap binds
-    e  -> Left $ T.pack $ unlines e
+    e  -> Left $ unlines e
   where
     toMap     = M.fromList . map (\(r,w,u) -> (r,(w,u)))
     toBind    = map (\(r,(w,u)) -> (r,w,u)) . M.toList
-    decodeBind :: [Text] -> [Either String Binding]
-    decodeBind = map ((\s-> either (\(pos,e) -> Left $ prettyPosWithSource pos s e)
-                            Right (decode1 s)) . S.fromStrict . encodeUtf8) 
+    decodeBind :: Text -> Either (Pos,String) YDoc -> Either String Binding
+    decodeBind text edoc =
+      let bssrc = S.fromStrict $ encodeUtf8 text
+      in case edoc of
+        Left (pos,err) -> Left $ prettyPosWithSource pos bssrc err
+        Right doc ->
+          either (\(pos,err) -> Left $ prettyPosWithSource pos (yamlText doc) err)
+          Right $ parseEither $ mkBinding (yamlRoot doc) 
       
 
 -- makeJsonMap refs cIfs = -- H.insert "instance" (toJSON $ sort refs)

@@ -14,7 +14,7 @@
 ----------------------------------------------------------------------
 module CoInSyDe.Internal.Map (
   -- * CoInSyDe 'Map' Type
-  Id, Map(..), (!?),
+  Id, Map(..), (!?), (!~),
   -- * History-Bookkeeping Map
   MapH, Info(..), Policy(..), prettyInfo,
   mkDb, (!*), (!^), mapDb, 
@@ -51,6 +51,9 @@ instance ToYAML v => ToYAML (Map v) where
 (!?) :: Show t => Map t -> Id -> Maybe t
 (!?) d k =  M.lookup k d
 
+(!~) :: Show t => Map t -> Id -> Either String t
+(!~) d k =  maybe (Left msg) Right $ M.lookup k d
+  where msg = "Key " ++ show k ++ " not found in dictionary with " ++ show (M.keys d)
 -------------------------------------------------------------
 
 -- | Stores information about the current entry (e.g. component).

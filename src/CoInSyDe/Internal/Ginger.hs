@@ -4,12 +4,13 @@ module CoInSyDe.Internal.Ginger (
   mkPlaceholderFun, rangeFun, portLookupFun
   ) where
 
+import           Control.Arrow ((&&&))
 import           Control.Monad.Writer.Lazy
 import           Data.Default
 import qualified Data.HashMap.Strict as M
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.YAML (Node)
+import           Data.YAML (Node, Pos(..))
 import           Text.Ginger
 import           Text.Ginger.GVal
 import           Text.Ginger.Run.Type (GingerContext (..),throwHere)
@@ -38,25 +39,28 @@ type GRunner  = Run SourcePos GWriter Text
 type GContext = GingerContext SourcePos GWriter Text
 
 tellG  = tell . Acc
-newG x = writer (T.empty, Acc $ Right x)
+newG x = writer (T.empty, Acc x)
 execG  = getAccum . execWriter
 
 -- | Makes a template placeholder function from a target function @\ id arglist@. This
 -- function uses only positional arguments.
-mkPlaceholderFun :: (Text -> [Text] -> Either Text Text) -> Function GRunner
-mkPlaceholderFun f xs = do
+mkPlaceholderFun :: YSrcCode -> (Text -> [Text] -> Either String Text)
+                 -> Function GRunner
+mkPlaceholderFun src f xs = do
   let (name:args) =  map (asText . snd) xs
-      pArgs = T.intercalate "; " args
-  transformed <- either (throwHere . ArgumentsError (Just pArgs)) return $ f name args
+      msg = "PlaceholderError at " ++ show (ysrcPath src)
+            ++ " (" ++ show (posLine $ ysrcPos src) ++ ":"
+            ++ show (posColumn $ ysrcPos src) ++ ")\n"
+  transformed <- return $ either (Left . (++) msg) Right $ f name args
   _ <- liftRun2 newG transformed
   return def
 
-mkGingerContext :: Info          -- ^ where the template source is found
+mkGingerContext :: YSrcCode      -- ^ the template source structure
                 -> Map (Node ()) -- ^ built YAML dictionary
-                -> (Text -> [Text] -> Either Text Text)
+                -> (Text -> [Text] -> Either String Text)
                 -- ^ placeholder expander function defined by the target
                 -> GContext      -- ^ Ginger context
-mkGingerContext info usrDict phFun = makeContextTextExM look write except
+mkGingerContext srcdoc usrDict phFun = makeContextTextExM look write except
   where
     look :: VarName
          -> Run SourcePos GWriter Text (GVal (Run SourcePos GWriter Text))
@@ -68,19 +72,22 @@ mkGingerContext info usrDict phFun = makeContextTextExM look write except
     except :: RuntimeError SourcePos -> GWriter ()
     except e@(RuntimeErrorAt p (IndexError i)) = tellG $ Left $
       T.unpack (runtimeErrorWhat e) ++ " at " ++
-      concatMap (show . flip setSourceName (prettyInfo info)) (runtimeErrorWhere e)
-      ++ "\nCannot find key " ++ show i ++ " in dictionary\n"
-      ++ prettyYNode (toYAML usrDict)
+      concatMap (prettyYSrcWithOffset srcdoc msg) (getOffset e)
+      where msg = " Cannot find key " ++ show i ++ " in dictionary\n"
+                  ++ prettyYNode (toYAML usrDict)
     except e = tellG $ Left $
       T.unpack (runtimeErrorWhat e) ++ " at " ++
-      concatMap (show . flip setSourceName (prettyInfo info)) (runtimeErrorWhere e)
-      ++ "\n" ++ T.unpack (runtimeErrorMessage e)
+      concatMap (prettyYSrcWithOffset srcdoc msg) (getOffset e)
+      where msg = T.unpack (runtimeErrorMessage e)
       
     contextDict :: Map (GVal GRunner)
-    contextDict = M.insert "placeholder" (fromFunction $ mkPlaceholderFun phFun) $
-                  M.insert "range"       (fromFunction rangeFun) $
-                  M.insert "port"        (fromFunction portLookupFun) $
-                  M.map toGVal usrDict
+    contextDict =
+      M.insert "placeholder" (fromFunction $ mkPlaceholderFun srcdoc phFun) $
+      M.insert "range"       (fromFunction rangeFun) $
+      M.insert "port"        (fromFunction portLookupFun) $
+      M.map toGVal usrDict
+
+getOffset = map (sourceLine &&& sourceColumn) . runtimeErrorWhere 
 
 ------------------------------------------------------------------    
 
@@ -113,3 +120,4 @@ portLookupFun [] = throwHere $ ArgumentsError (Just "port") "called with no argu
 portLookupFun ((_,x):_) = do
   context <- getVar (asText x)
   return $ toGVal context
+

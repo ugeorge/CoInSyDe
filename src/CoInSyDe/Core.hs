@@ -21,15 +21,16 @@ module CoInSyDe.Core (
   -- * Core Types
   Target(..), Comp(..), If(..), Instance(..), Binding, updateOnBind,
   -- * Core Type Constructors
-  mkNative, mkTemplate, mkPattern, mkBindDict
+  mkNative, mkTemplate, mkPattern, mkBindDict, mkBinding
   ) where
 
 import Control.Arrow ((***))
 import Control.Monad (when)
 import Data.Binary
+import Data.Either
 import Data.HashMap.Strict as M hiding (map,filter,foldr, null)
 import Data.Maybe
-import Data.Text as T (Text,append,pack)
+import Data.Text as T (Text,append,pack,stripEnd)
 import Data.Text.Lazy (toStrict)
 import Data.Text.Lazy.Encoding (decodeUtf8)
 import Data.YAML (encode1)
@@ -75,7 +76,7 @@ data Comp l where
     , cpReqs  :: [Requ l]    -- ^ special requirements for component
     , cpRefs  :: InstMap     -- ^ maps a (template) function placeholder to
                  -- an existing component, with new bindings
-    , cpTpl   :: (YPos,Text) -- ^ template code
+    , cpTpl   :: YSrcCode    -- ^ template code
     } -> Comp l
   -- | Native functional. Code used \"as-is\", no manipulation done.
   NvComp :: Target l =>
@@ -102,9 +103,15 @@ instance Binary Instance
 
 type Binding = (Id, Id, Maybe Text)
 
-updateOnBind :: Target l => IfMap l -> [Binding] ->  IfMap l
-updateOnBind ifmap  = M.fromList . map update
-  where update (repl,with,usage) = (repl, (ifmap M.! with) {ifUse = usage})
+updateOnBind :: Target l => IfMap l -> [Binding] ->  Either String (IfMap l)
+updateOnBind ifmap bindings =
+  let (errs,nIfs) = partitionEithers $ map update bindings
+  in case errs of
+    [] -> Right $ M.fromList nIfs
+    e  -> Left $ unlines e
+  where update (repl,with,usage) =
+          let renew i = (repl, i {ifUse = usage})
+          in renew <$> (ifmap !~ with)
 
 ------------- EXIFED DICTIONARY BUILDERS -------------
 
@@ -127,7 +134,7 @@ mkNative typeLib n = do
   code   <- n @? "code"
   when (isNothing code && null requs) $
     yamlError n "Native code or requirement missing!"
-  return $ NvComp name (ports `union` params) requs code
+  return $ NvComp name (ports `union` params) requs (T.stripEnd <$> code)
    
 -- | Builds a component dictionaty and load history from nodes
 --
@@ -135,17 +142,18 @@ mkNative typeLib n = do
 -- 
 -- The @CTEXT@ needs to be written in a template langiage, see 'TTm'.
 mkTemplate :: Target l
-           => MapH (Type l)   -- ^ (fully-loaded) library of types
+           => FilePath
+           -> MapH (Type l)   -- ^ (fully-loaded) library of types
            -> YMap            -- ^ @\<root\>@ node
            -> YParse (Comp l) -- ^ updated library of components
-mkTemplate typeLib n = do
+mkTemplate path typeLib n = do
   name   <- n @! "name"
   requs  <- n |= "requirement" >>= mapM mkRequ 
   ports  <- n |= "port"        >>= mkParamDict
   params <- n |= "parameter"   >>= mkParamDict
   templ  <- n @! "code"
   tmpos  <- n @^ "code"
-  return $ TmComp name (ports `union` params) requs M.empty (tmpos,templ)
+  return $ TmComp name (ports `union` params) requs M.empty (YSrc path tmpos templ)
 
 -- | Builds a component dictionaty and load history from all nodes
 --
@@ -206,9 +214,22 @@ mkBindDict place pIfs = fmap ((id *** concat) . unzip) . mapM load . zip [0..]
               return ((repl, with, usage),[])
             (Nothing, Just with) -> do
               let newRef = "__" `append` place `append` pack (show ix)
-              return ((repl, newRef, Nothing), [(newRef, Param with Nothing)]) 
-            _ -> yamlError n "Binding node malformed!"
+              return ((repl, newRef, Nothing), [(newRef, Param with Nothing)])
+            _ -> yamlError n "Expected either \"with\" or \"withParam\" in binding!"
 
+mkBinding :: YMap -> YParse Binding
+mkBinding n = do 
+  repl  <- n @! "replace"
+  with  <- n @? "with"
+  withv <- n @? "withParam" :: YParse (Maybe Text)
+  usage <- n @? "usage"
+  case (with ,withv) of
+    (Just with, Nothing) -> return (repl, with, usage)
+    (Nothing, Just with)
+      -> yamlError n "No support for template parameter binding yet!"
+    _ -> yamlError n "Expected either \"with\" or \"withParam\" in binding!"
+
+  
 ------------- OTHER INSTANCES -------------
 
 instance  Target l => Binary (Comp l) where
@@ -235,7 +256,7 @@ instance Target l => ToDoc (Comp l) where
   toDoc _ cp@TmComp{} = definitionList
     [ (text "interfaces:",    map ifList $ M.toList $ cpIfs cp)
     , (text "requirements:",  map (toDoc "") $ cpReqs cp) 
-    , (text "template code:", [codeBlock $ snd $ cpTpl cp]) ]
+    , (text "template code:", [codeBlock $ ysrcCode $ cpTpl cp]) ]
     where
       ifList (n,p) = rowTab
         [ simpleTable [] [[plain $ ibold n <> strong ": ",  toDoc "" p]]

@@ -20,7 +20,7 @@ import qualified Data.Text as T
 import           CoInSyDe.Core
 import           CoInSyDe.Internal.Ginger
 import           CoInSyDe.Internal.Map
-import           CoInSyDe.Internal.YAML (YPos)
+import           CoInSyDe.Internal.YAML (YSrcCode(..))
 
 
 type CodeGen o l = State (GenState o l)
@@ -82,10 +82,10 @@ logDebug msg = do
 -- TODO: format parser error based on YPos
 fromTemplate :: Target l
              => GContext
-             -> T.Text
+             -> YSrcCode
              -> CodeGen o l T.Text
 fromTemplate context tpl = do
-  let template = T.unpack tpl
+  let template = T.unpack $ ysrcCode tpl
       options  = mkParserOptions (\_ -> return Nothing)
       errParse = gingerParseError . formatParserError (Just template) 
   ginger <- either errParse return =<< parseGinger' options template
@@ -105,13 +105,13 @@ instance Exception GeneratorException
 
 instance Show GeneratorException where
   show (GenError stage stack msg) =
-    "Code generator error in stage " ++ show stage ++ ":\n   " ++ msg
-    ++ "\n<showing call stack>\n" ++ L.unlines (map show stack)
+    "Code generator error in stage " ++ show stage ++ ":\n*  " ++ msg
+    ++ "\n\n<showing call stack>\n" ++ L.unlines (reverse $ map show stack)
   show (GingerParseError call msg) =
     "Template parse error in component\n" ++ show call ++ "\n" ++ msg
   show (GingerRunError stack msg) =
-    "Template execution error:\n   " ++ msg
-    ++ "\n<showing call stack>\n" ++ L.unlines (map show stack)
+    "Template execution error:\n*  " ++ msg
+    ++ "\n\n<showing call stack>\n" ++ L.unlines (reverse $ map show stack)
 
 -- only one used outside
 genError :: Target l => String -> CodeGen o l a

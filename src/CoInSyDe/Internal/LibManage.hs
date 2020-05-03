@@ -188,7 +188,7 @@ makeCpLibs tyLib what lib doc  = (yamlRoot doc |= pack what) >>= foldM load lib
           info <- mkInfo doc node
           (policy,entry) <- case what of
             "native"   -> (,) Keep    <$> mkNative tyLib node
-            "template" -> (,) Keep    <$> mkTemplate tyLib node
+            "template" -> (,) Keep    <$> mkTemplate (yamlPath doc) tyLib node
             "pattern"  -> (,) Replace <$> mkPattern tyLib lib node
           return $ dbUpdate policy name entry info lib 
 

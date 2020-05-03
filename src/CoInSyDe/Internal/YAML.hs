@@ -5,13 +5,15 @@ module CoInSyDe.Internal.YAML (
   YDoc(..), YMap, YNode, YPos, YParse,
   getPos, getLineAndColumn, getChildren, (|=),
   getAttr, queryNode, (@!), (@?), (@=), (@^),
-  readYDoc, withYDoc, parseYDoc, writeYAML,
-  yamlError, prettyErr, prettyYNode
+  getYDoc, readYDoc, withYDoc, parseYDoc, writeYAML,
+  yamlError, prettyErr, prettyYNode,
+  YSrcCode(..), ysrcFromText, prettyYSrcWithOffset
   ) where
 
 import           Control.Monad (liftM,when)
 import qualified Data.Aeson as JSON
 import           Data.Binary
+import           Data.ByteString.Char8 as C8 (pack)
 import qualified Data.ByteString.Lazy as S
 import qualified Data.ByteString.Lazy.Char8 as SC (unpack)
 import           Data.Default
@@ -21,6 +23,7 @@ import           Data.Maybe
 import           Data.Scientific (fromFloatDigits)
 import           Data.Text (Text,append)
 import           Data.Text.Encoding (encodeUtf8)
+import           GHC.Generics
 -- import qualified Data.Vector as V
 import           Data.Word (Word8)
 import           Data.YAML
@@ -100,6 +103,8 @@ queryNode l n = query' l n >>= maybe (return Nothing) parseYAML
       Mapping{} -> withMap "" (.:? q) n >>= maybe (return Nothing) (queryNode qs)
       _         -> return Nothing
 
+
+
 -- getTextPos (Scalar p _) = p
 -- getTextPos a = error "Not a text node!" 
 
@@ -143,12 +148,20 @@ handleMeta p bs = do
 readYDoc :: FilePath -> IO YDoc
 readYDoc p = S.readFile p >>= handleMeta p >>= \(s,m) ->
   either (die . inStyle p s) (return . YDoc p s m . getRoot . head) (decodeNode s)
-  where getRoot r = case docRoot r of
-          r@Mapping{} -> ("document", r)
-          _ -> error $ " Parse error in file\n++++ " ++ p
-                    ++ "\nDocument is not a dictionary."
-        inStyle path inp (pos,msg) = prettyPosWithSource pos inp
-          (" YAML parse error in file\n\t+++ " ++ path ++ "\n" ) ++ msg ++ "\n"
+  where
+    getRoot r = case docRoot r of
+      r@Mapping{} -> ("document", r)
+      _ -> error $ " Parse error in\n++++ " ++ p ++ "\nDocument is not a dictionary."
+    inStyle path inp (pos,msg) = prettyPosWithSource pos inp
+      (" YAML parse error in file\n\t+++ " ++ path ++ "\n" ) ++ msg ++ "\n"
+
+getYDoc :: Text -> Either (Pos,String) YDoc
+getYDoc x = liftM (YDoc "" bssrc Nothing ) (decodeNode bssrc >>= getRoot . head)
+  where
+    bssrc = S.fromStrict $ encodeUtf8 x
+    getRoot r = case docRoot r of
+      r@Mapping{} -> Right ("document", r)
+      _ -> Left (Pos (-1) (-1) 0 0, "Document is not a dictionary.")
 
 withYDoc :: FilePath -> (YDoc -> a) -> IO a
 withYDoc path f = liftM f (readYDoc path)
@@ -172,39 +185,39 @@ prettyYNode = SC.unpack . encode1
 --     where makeNode = either (error . show) id . decode1 . packChars
 
 instance Show a => ToGVal m (Node a) where
-    toGVal = yamlToVal
+  toGVal (Scalar _ SNull)      = def
+  toGVal (Scalar _ (SBool b))  = toGVal b
+  toGVal (Scalar _ (SFloat d)) = toGVal (fromFloatDigits d)
+  toGVal (Scalar _ (SInt i))   = toGVal i
+  toGVal (Scalar _ (SStr t))   = toGVal t
+  toGVal (Sequence _ _ lst)    = toGVal lst
+  toGVal (Anchor _ _ _)        = def
+  toGVal (Mapping _ _ m)       = toGVal $
+    H.fromList $ map (\(k,v) -> (ynodeToText k, v)) $ M.toList m
+    where ynodeToText (Scalar _ (SStr t))   = t
+          ynodeToText n = error $ "YAML node is not text. Cannot convert to GVal!\n"
+                          ++ show n
+  toGVal _ = def -- TODO: is it OK?
 
--- ynodeToText (Scalar _ (SStr t))   = t
--- ynodeToText n = error $ "YAML node is not text. Cannot convert to JSON!\n" ++ show n
--- ynodeToJson (Scalar _ SNull)      = JSON.Null
--- ynodeToJson (Scalar _ (SBool b))  = JSON.Bool b
--- ynodeToJson (Scalar _ (SFloat d)) = JSON.Number (fromFloatDigits d)
--- ynodeToJson (Scalar _ (SInt i))   = JSON.Number (scientific i 0)
--- ynodeToJson (Scalar _ (SStr t))   = JSON.String t
--- ynodeToJson (Mapping _ _ m)     = JSON.Object
---   $ H.fromList $ map (\(k,v) -> (ynodeToText k, ynodeToJson v)) $ M.toList m
--- ynodeToJson (Sequence _ _ lst)    = JSON.Array $ V.fromList $ map ynodeToJson lst
--- ynodeToJson (Anchor _ _ _)        = JSON.Null
+-----------------------------------------------
 
-ynodeToText (Scalar _ (SStr t))   = t
-ynodeToText n = error $ "YAML node is not text. Cannot convert to GVal!\n" ++ show n
-yamlToVal :: Show a => Node a -> GVal m
-yamlToVal (Scalar _ SNull)      = def
-yamlToVal (Scalar _ (SBool b))  = toGVal b
-yamlToVal (Scalar _ (SFloat d)) = toGVal (fromFloatDigits d)
-yamlToVal (Scalar _ (SInt i))   = toGVal i
-yamlToVal (Scalar _ (SStr t))   = toGVal t
-yamlToVal (Mapping _ _ m)       = toGVal $
-  H.fromList $ map (\(k,v) -> (ynodeToText k, v)) $ M.toList m
-yamlToVal (Sequence _ _ lst)    = toGVal lst
-yamlToVal (Anchor _ _ _)        = def
+data YSrcCode = YSrc { ysrcPath :: FilePath
+                     , ysrcPos  :: Pos
+                     , ysrcCode :: Text
+                     } deriving (Show,Generic)
+instance Binary YSrcCode
 
+prettyYSrcWithOffset :: YSrcCode -> String -> (Int, Int) -> String
+prettyYSrcWithOffset (YSrc path (Pos _ _ l c) code) msg (offsL,offsC) =
+  shpath ++ "\n" ++ prettyPosWithSource newpos srcbs msg
+  where
+    shpath = if null path then "" else show path ++ " (" ++ show (l + offsL) ++ ":"
+                                       ++ show (c + offsC) ++ ")\n"
+    newpos = Pos coffs coffs (l + offsL) (offsC + 3)
+    srcbs  = S.fromStrict $ encodeUtf8 code
+    coffs  = let clines = take offsL $ S.split (ch2w '\n') srcbs
+             in fromIntegral $ sum $ map S.length clines
+    ch2w   = toEnum . fromEnum
 
-
--- rawJSONToGVal :: JSON.Value -> GVal m
--- rawJSONToGVal (JSON.Number n) = toGVal n
--- rawJSONToGVal (JSON.String s) = toGVal s
--- rawJSONToGVal (JSON.Bool b) = toGVal b
--- rawJSONToGVal JSON.Null = def
--- rawJSONToGVal (JSON.Array a) = toGVal $ Vector.toList a
--- rawJSONToGVal (JSON.Object o) = toGVal o
+ysrcFromText :: Text -> YSrcCode
+ysrcFromText = YSrc "" (Pos (-1) (-1) 0 0)
