@@ -28,10 +28,10 @@ type CGen = CodeGen LayoutOptions C
 -------------------------------
 
 -- pretty printer helper
-sepDef c x = (braces . nest 4 . sep)
+sepDef c x = (braces . nest 2 . sep)
              ([softline'] ++ punctuate c x ++ [softline'])
 sepArg     = align . parens . sep . punctuate comma
-cBraces  x = vsep [nest 4 $ vsep $ lbrace : x, rbrace]
+cBraces  x = vsep [nest 2 $ vsep $ lbrace : x, rbrace]
 -- semiM      = fmap (<>semi)
 
 nullId = "_oOo_" :: Id
@@ -288,12 +288,15 @@ pMainDef globSts = do
   cp   <- getCp
   sif  <- categorize (cpIfs cp)
   sanity sif cp
-  let varPorts = globSts ++ map snd (var sif ++ maybeToList (ret sif))
-  vars <- mapM (fmap (<>semi) . pVarInit) varPorts
-  retS <- maybe (return emptyDoc)
-          (fmap (\a -> "return" <+> pretty a <> semi) . pVarUse) (snd <$> ret sif)
+  -- let varPorts = globSts ++ map snd (var sif ++ maybeToList (ret sif))
+  -- vars <- mapM (fmap (<>semi) . pVarInit) varPorts
+  -- retS <- maybe (return emptyDoc)
+  --         (fmap (\a -> "return" <+> pretty a <> semi) . pVarUse) (snd <$> ret sif)
+  -- code <- pFunCode (cpIfs cp)
+  -- return $ header <+> cBraces (vars ++ code ++ [retS])
+  vars <- mapM (fmap (<>semi) . pVarInit) globSts
   code <- pFunCode (cpIfs cp)
-  return $ header <+> cBraces (vars ++ code ++ [retS])
+  return $ header <+> cBraces (vars ++ code)
   where
     header = "int main(int argc, char ** argv)"
     sanity _ NvComp{} = genError "A native C function cannot be top module!"
@@ -310,12 +313,11 @@ pFunDef = do
   retA <- pVarDecl $ maybe voidVar snd (ret sif)
   let header = retA <+> pretty (cpName cp) <+> sepArg args
   ---- body ----
-  vars <- mapM (fmap (<>semi) . pVarDecl . snd) (maybeToList (ret sif) ++ var sif)
-  retS <- maybe (return emptyDoc)
-          (fmap (\a -> "return" <+> pretty a <> semi) . pVarUse) (snd <$> ret sif)
+  -- vars <- mapM (fmap (<>semi) . pVarDecl . snd) (maybeToList (ret sif) ++ var sif)
+  -- retS <- maybe (return emptyDoc)
+  --         (fmap (\a -> "return" <+> pretty a <> semi) . pVarUse) (snd <$> ret sif)
   body <- case cp of
-            TmComp{} -> do code <- pFunCode (cpIfs cp)
-                           return $ vars ++ code ++ [retS]
+            TmComp{} -> pFunCode (cpIfs cp)
             NvComp{} -> maybe
                         (genError "Cannot expand native code which was not given!")
                         (return . (:[]) . pretty) (cpCode cp)
@@ -327,6 +329,12 @@ pFunCode boundIfs = do
   cp     <- getCp
   layout <- layoutOpts <$> get
   st     <- get
+  ------------------------
+  sif  <- categorize (cpIfs cp)
+  vars <- mapM (fmap (<>semi) . pVarInit . snd) (maybeToList (ret sif) ++ var sif)
+  retS <- maybe (return emptyDoc)
+          (fmap (\a -> "return" <+> pretty a <> semi) . pVarUse) (snd <$> ret sif)
+  ------------------------
   let scopedIfs  = boundIfs `M.union` cpIfs cp
       dictionary = M.mapWithKey ifToYAML scopedIfs
       genFun n tplArgs
@@ -340,12 +348,12 @@ pFunCode boundIfs = do
               generator f b = spawnGen st rId (f b)
               
   let phFun :: Text -> [Text] -> Either String Text
-      phFun n args = renderStrict . removeTrailingWhitespace .
-                     layoutPretty layout . align . vsep <$> genFun n args
+      phFun n args = renderStrict . removeTrailingWhitespace . -- TODO: fix indent
+                     layoutPretty layout . indent 2 . vsep <$> genFun n args
       context = mkGingerContext (cpTpl cp) dictionary phFun
    
   code <- fromTemplate context $ cpTpl cp
-  return $ map pretty $ T.lines code
+  return $ vars ++ map pretty (T.lines code) ++ [retS]
 
 pFunCall :: IfMap C -> CGen [Doc ()]
 pFunCall reboundParentIfs = do
@@ -365,28 +373,6 @@ pFunCall reboundParentIfs = do
                    (return . (,) i) $ reboundParentIfs !~ i
     usage (_,TPort x u) = maybe (pVarBind x) (return . pretty) u 
     usage (i,Param _ u) = return $ maybe (braces $ braces $ pretty i) pretty u 
-
-
--- for bindings I am building a template macro first
--- pFunCall :: Instance -> IfMap C -> CGen (Doc ())
--- pFunCall parentInst parentIfs = do
---   let errmsg = "... during interface rebinding in instanciating function call\n"
---   cp    <- getCp
---   (retId,argsIds) <- ((fmap fst . ret) &&& (map fst . args)) <$> categorize (cpIfs cp)
---   bIfs  <- either (genError . (++) errmsg) return
---            $ updateOnBind parentIfs (refBinds parentInst)
---   bArgs <- mapM (\i -> usage i $ bIfs M.! i) argsIds
---   bRet  <- maybe (usage nullId $ TPort voidVar Nothing)
---                 (\i -> usage i $ bIfs M.! i) retId
---   let template   = ysrcFromText $ renderStrict $ layoutCompact
---                    $ bRet <> pretty (cpName cp) <> sepArg bArgs
---       dictionary = M.mapWithKey ifToYAML parentIfs
---       context    = mkGingerContext template dictionary (\_ _ -> Right "")
---   text <- fromTemplate context template :: CGen Text
---   return $ pretty text
---   where
---     usage _ (TPort x u) = maybe (pVarBind x) (return . pretty) u 
---     usage i (Param _ u) = return $ maybe (braces $ braces $ pretty i) pretty u 
 
 ----------------------------------------------------------------------
 
