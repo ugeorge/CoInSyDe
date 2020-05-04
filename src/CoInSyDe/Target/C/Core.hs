@@ -150,7 +150,7 @@ instance ToYAML (Type C) where
 ifToYAML :: Id -> If C -> Node ()
 ifToYAML i (TPort (Var n k t v) u) = mapping $
   [ "_name" .= n, "_type" .= toYAML t ]  ++
-  [ "_use" .= fromMaybe ("{{" <> i <> "._name" <> "}}") u ] ++
+  [ "_use" .= fromMaybe "{{ _name }}" u ] ++
   maybe [] (\x -> [ "_val" .= x ]) v
 ifToYAML _ (Param n _) = toYAML n
   

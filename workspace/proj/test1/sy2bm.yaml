@@ -1,0 +1,84 @@
+pattern:
+- name: source
+  type: scan_sy
+  ports:
+  - {name: out, class: oarg, type: Int}
+  - {name: st, class: state, type: Int, value: '0'}
+  instances:
+  - placeholder: ns_func
+    component: source_func
+    bindings:
+    - {replace: ret,   with: out}
+    - {replace: state, with: st}
+
+- name: p1
+  type: comb_sy
+  ports:
+  - {name: in, class: iarg, type: Int}
+  - {name: out, class: oarg, type: Int}
+  instances:
+  - placeholder: func
+    component: dummy_func
+    bindings:
+    - {replace: arg, with: in}
+    - {replace: ret, with: out}
+
+- name: sink
+  type: comb_sy
+  ports:
+  - {name: in, class: iarg, type: Int}
+  instances:
+  - placeholder: func
+    component: sink_func
+    bindings:
+     - {replace: arg, with: in}
+
+- name: top_main
+  type: std_seq_composite
+  ports:
+  - {name: s2p1, class: var, type: Int}
+  - {name: p12s, class: var, type: Int}
+  parameters:
+  - {name: NUM_CYCLES, class: param, value: "99999999"}
+  - {name: schedule, class: param, value: ['1','2','3','4']}
+  instances:
+  - placeholder: '1'
+    component: source
+    inline: false
+    bindings:
+    - {replace: out, with: s2p1}
+  - placeholder: '2'
+    component: p1
+    inline: true
+    bindings:
+    - {replace: in, with: s2p1}
+    - {replace: out, with: p12s}
+  - placeholder: '3'
+    component: sink
+    inline: true
+    bindings:
+    - {replace: in, with: p12s}
+  - placeholder: '4'
+    component: getchar 
+  # - placeholder: '4'
+  #   component: wait
+  #   bind: {replace: cycles, with: NUM_CYCLES}
+   
+native:
+- name: source_func
+  interface:
+  - {name: state, class: iarg, type: Int}
+  - {name: ret, class: ret, type: Int}
+  requirement: {include: "lib/funcs_sy.c"}
+
+- name: dummy_func
+  interface:
+  - {name: arg, class: iarg, type: Int}
+  - {name: ret, class: ret, type: Int}
+  requirement: {include: "lib/funcs_sy.c"}
+
+- name: sink_func
+  interface: {name: arg, class: iarg, type: Int}
+  requirement:
+  - include: "stdio.h"
+  - include: "lib/funcs_sy.c"

@@ -1,0 +1,93 @@
+pattern:
+- name: top_main_source
+  type: process_sdf
+  interface:
+  - {name: s2p1_shared, class: port, type: SmFifo, constructor: mk_sm_fifo}
+  - {name: obuff, class: var,   type: ArrayInt2}
+  - {name: st, class: state, type: Int, value: '0'}
+  - {name: outputs, class: param, value:
+        [{var: obuff, port: s2p1_shared, prod: 2, mutex: MUTEX_0_NAME}]}
+  instance:
+  - placeholder: func
+    component: source_func
+    bind:
+    - {replace: 1_ret,   with: obuff}
+    - {replace: 2_state, with: st}
+  - placeholder: mk_sm_fifo
+    component: mkFifoWriter
+    bind:
+    - {replace: 1_baseAddress, withText: 'ONCHIP_SHARED_0_BASE'}
+    - {replace: 2_size, withText: '6'}
+  requirement:
+    include: "system.h"
+
+- name: top_main_p1
+  type: process_sdf
+  interface:
+  - {name: s2p1_shared, class: port, type: SmFifo, constructor: mk_sm_fifo_read}
+  - {name: p12s_shared, class: port, type: SmFifo, constructor: mk_sm_fifo_write}
+  - {name: ibuff, class: var, type: ArrayInt3}
+  - {name: obuff, class: var, type: ArrayInt1}
+  - {name: inputs, class: param, value:
+        [{var: ibuff, port: s2p1_shared, cons: 3, mutex: MUTEX_0_NAME}]}
+  - {name: outputs, class: param, value:
+        [{var: obuff, port: p12s_shared, prod: 1, mutex: MUTEX_1_NAME}]}
+  instance:
+  - placeholder: func
+    component: dummy_func
+    bind:
+    - {replace: 2_arg, with: ibuff}
+    - {replace: 1_ret, with: obuff}
+
+  - placeholder: mk_sm_fifo_read
+    component: mkFifoReader
+    bind:
+    - {replace: 1_baseAddress, withText: 'ONCHIP_SHARED_0_BASED'}
+    - {replace: 2_size, withText: '6'}
+
+  - placeholder: mk_sm_fifo_write
+    component: mkFifoWriter
+    bind:
+    - {replace: 1_baseAddress, withText: 'ONCHIP_SHARED_0_BASE + sizeOfFifo(6)'}
+    - {replace: 2_size, withText: '2'}
+  requirement:
+    include: "system.h"
+
+- name: top_main_sink
+  type: process_sdf
+  interface:
+  - {name: p12s_shared, class: port, type: SmFifo, constructor: mk_sm_fifo}
+  - {name: ibuff, class: var, type: Int}
+  - {name: inputs, class: param, value:
+        [{var: ibuff, port: p12s_shared, cons: 2, mutex: MUTEX_1_NAME}]}
+  instance:
+  - placeholder: func
+    component: sink_func
+    bind:
+     - {replace: 1_arg, with: ibuff}
+  - placeholder: mk_sm_fifo
+    component: mkFifoReader
+    bind:
+    - {replace: 1_baseAddress, withText: 'ONCHIP_SHARED_0_BASE + sizeOfFifo(6)'}
+    - {replace: 2_size, withText: '2'}
+  requirement:
+    include: "system.h"
+    
+native:    
+- name: source_func
+  interface:
+  - {name: 2_state, class: iarg, type: Int}
+  - {name: 1_ret, class: oarg, type: Int}
+  requirement: {include: "lib/funcs_sdf.c"}
+
+- name: dummy_func
+  interface:
+  - {name: 2_arg, class: iarg, type: Int}
+  - {name: 1_ret, class: oarg, type: Int}
+  requirement: {include: "lib/funcs_sdf.c"}
+
+- name: sink_func
+  interface: {name: 1_arg, class: iarg, type: Int}
+  requirement:
+  - include: "stdio.h"
+  - include: "lib/funcs_sdf.c"

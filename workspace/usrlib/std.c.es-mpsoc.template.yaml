@@ -1,0 +1,215 @@
+template:
+- name: scan_sy 
+  requirement:
+  - include: "system.h"
+  - include: "altera_avalon_mutex.h"
+  code: |
+    {% macro flag(arg0) %}{{concat(interface(arg0).name,'_flag')}}{% endmacro %}
+    {% macro mutex(arg0) %}{{concat(interface(arg0).name,'_mutex')}}{% endmacro %}
+    {% if inputs %}
+    {% for input in inputs %}
+    alt_mutex_dev* {{mutex(input.port)}} = altera_avalon_mutex_open({{input.mutex}});
+    {% endfor %}
+    {% endif %}
+    {% if outputs %}
+    {% for output in outputs %}
+    alt_mutex_dev* {{mutex(output.port)}} = altera_avalon_mutex_open({{output.mutex}});
+    *{{mutex(output.port)}}.flag = 0;
+    {% endfor %}
+    {% endif %}
+    while (1){
+    {% if inputs %}
+    {% for input in inputs %}
+        char {{flag(input.port)}} = 0;
+        while (!{{flag(input.port)}}) {
+            altera_avalon_mutex_lock({{mutex(input.port)}}, 1); 
+            if (*{{mutex(input.port)}}.flag){
+                {{flag(input.port)}} = 1;
+                {{interface(input.var).name}} = *{{mutex(input.port)}}.shared;
+                *{{mutex(input.port)}}.flag = 0;
+            }
+            altera_avalon_mutex_unlock({{mutex(input.port)}});
+        }
+    {% endfor %}
+    {% endif %}    
+    
+        {{placeholder("ns_func")}}
+        
+    {% if outputs %}
+    {% for output in outputs %}
+        char {{flag(output.port)}} = 0; 
+        while (!{{flag(output.port)}}) {
+            altera_avalon_mutex_lock({{mutex(output.port)}}, 1); 
+            if (!*{{mutex(output.port)}}.flag){
+                {{flag(output.port)}} = 1;
+                *{{mutex(output.port)}}.shared = {{interface(output.var).name}};
+                *{{mutex(output.port)}}.flag = 1;
+            }
+            altera_avalon_mutex_unlock({{mutex(output.port)}});
+        }
+    {% endfor %}
+    {% endif %}    
+    }
+
+- name: comb_sy 
+  requirement:
+  - include: "system.h"
+  - include: "altera_avalon_mutex.h"
+  code: |
+    {% macro flag(arg0) %}{{concat(interface(arg0).name,'_flag')}}{% endmacro %}
+    {% macro mutex(arg0) %}{{concat(interface(arg0).name,'_mutex')}}{% endmacro %}
+    {% if inputs %}
+    {% for input in inputs %}
+    alt_mutex_dev* {{mutex(input.port)}} = altera_avalon_mutex_open({{input.mutex}});
+    {% endfor %}
+    {% endif %}
+    {% if outputs %}
+    {% for output in outputs %}
+    alt_mutex_dev* {{mutex(output.port)}} = altera_avalon_mutex_open({{output.mutex}});
+    *{{mutex(output.port)}}.flag = 0;
+    {% endfor %}
+    {% endif %}
+    while (1){
+    {% if inputs %}
+    {% for input in inputs %}
+        char {{flag(input.port)}} = 0;
+        while (!{{flag(input.port)}}) {
+            altera_avalon_mutex_lock({{mutex(input.port)}}, 1); 
+            if (*{{mutex(input.port)}}.flag){
+                {{flag(input.port)}} = 1;
+                {{interface(input.var).name}} = *{{mutex(input.port)}}.shared;
+                *{{mutex(input.port)}}.flag = 0;
+            }
+            altera_avalon_mutex_unlock({{mutex(input.port)}});
+        }
+    {% endfor %}
+    {% endif %}    
+    
+        {{placeholder("func")}}
+        
+    {% if outputs %}
+    {% for output in outputs %}
+        char {{flag(output.port)}} = 0; 
+        while (!{{flag(output.port)}}) {
+            altera_avalon_mutex_lock({{mutex(output.port)}}, 1); 
+            if (!*{{mutex(output.port)}}.flag){
+                {{flag(output.port)}} = 1;
+                *{{mutex(output.port)}}.shared = {{interface(output.var).name}};
+                *{{mutex(output.port)}}.flag = 1;
+            }
+            altera_avalon_mutex_unlock({{mutex(output.port)}});
+        }
+    {% endfor %}
+    {% endif %}    
+    }
+
+- name: std_seq_composite
+  requirement:
+  - include: "system.h"
+  - include: "altera_avalon_mutex.h"
+  code: |
+    {% macro flag(arg0) %}{{concat(interface(arg0).name,'_flag')}}{% endmacro %}
+    {% macro mutex(arg0) %}{{concat(interface(arg0).name,'_mutex')}}{% endmacro %}
+    {% if inputs %}
+    {% for input in inputs %}
+    alt_mutex_dev* {{mutex(input.port)}} = altera_avalon_mutex_open({{input.mutex}});
+    {% endfor %}
+    {% endif %}
+    {% if outputs %}
+    {% for output in outputs %}
+    alt_mutex_dev* {{mutex(output.port)}} = altera_avalon_mutex_open({{output.mutex}});
+    *{{mutex(output.port)}}.flag = 0;
+    {% endfor %}
+    {% endif %}
+    while (1){
+    {% if inputs %}
+    {% for input in inputs %}
+        char {{flag(input.port)}} = 0;
+        while (!{{flag(input.port)}}) {
+            altera_avalon_mutex_lock({{mutex(input.port)}}, 1); 
+            if (*{{mutex(input.port)}}.flag){
+                {{flag(input.port)}} = 1;
+                {{interface(input.var).name}} = *{{mutex(input.port)}}.shared;
+                *{{mutex(input.port)}}.flag = 0;
+            }
+            altera_avalon_mutex_unlock({{mutex(input.port)}});
+        }
+    {% endfor %}
+    {% endif %}    
+    
+    {% for inst in schedule %}
+    {{ placeholder(inst) }}
+    {% endfor %}
+            
+    {% if outputs %}
+    {% for output in outputs %}
+        char {{flag(output.port)}} = 0; 
+        while (!{{flag(output.port)}}) {
+            altera_avalon_mutex_lock({{mutex(output.port)}}, 1); 
+            if (!*{{mutex(output.port)}}.flag){
+                {{flag(output.port)}} = 1;
+                *{{mutex(output.port)}}.shared = {{interface(output.var).name}};
+                *{{mutex(output.port)}}.flag = 1;
+            }
+            altera_avalon_mutex_unlock({{mutex(output.port)}});
+        }
+    {% endfor %}
+    {% endif %}    
+    }
+
+- name: process_sdf 
+  requirement:
+  - include: "system.h"
+  - include: "altera_avalon_mutex.h"
+  - include: "lib/sm_fifo.h"
+  code: |
+    {% macro flag(arg0) %}{{concat(interface(arg0).name,'_flag')}}{% endmacro %}
+    {% macro mutex(arg0) %}{{concat(interface(arg0).name,'_mutex')}}{% endmacro %}
+    {% if inputs %}
+    {% for input in inputs %}
+    alt_mutex_dev* {{mutex(input.port)}} = altera_avalon_mutex_open({{input.mutex}});
+    {% endfor %}
+    {% endif %}
+    {% if outputs %}
+    {% for output in outputs %}
+    alt_mutex_dev* {{mutex(output.port)}} = altera_avalon_mutex_open({{output.mutex}});
+    {% endfor %}
+    {% endif %}
+    while (1){
+    {% if inputs %}
+        // reading all inputs
+    {% for input in inputs %}
+        char {{flag(input.port)}} = 0;
+        while (!{{flag(input.port)}}) {
+            altera_avalon_mutex_lock({{mutex(input.port)}}, 1); 
+            if (!almostEmpty({{input.port}}, {{input.cons}})){
+                {{flag(input.port)}} = 1;
+    {% for i in range(input.cons) %}
+                {{interface(input.var).name}}[{{i}}] = read({{input.port}});
+    {% endfor %}
+            }
+            altera_avalon_mutex_unlock({{mutex(input.port)}});
+        }
+    {% endfor %}
+    {% endif %}    
+
+        // executing kernel function
+        {{placeholder("func")}}
+        
+    {% if outputs %}
+        // writing all outputs
+    {% for output in outputs %}
+        char {{flag(output.port)}} = 0; 
+        while (!{{flag(output.port)}}) {
+            altera_avalon_mutex_lock({{mutex(output.port)}}, 1); 
+            if (!almostFull({{output.port}}, {{output.prod}})){
+                {{flag(output.port)}} = 1;
+    {% for i in range(output.prod) %}
+                write({{output.port}}, {{interface(output.var).name}}[{{i}}]);
+    {% endfor %}   
+            }
+            altera_avalon_mutex_unlock({{mutex(output.port)}});
+        }
+    {% endfor %}
+    {% endif %}    
+    }

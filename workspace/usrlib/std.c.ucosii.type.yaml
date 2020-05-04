@@ -1,0 +1,4 @@
+type:
+- name: VoidPointer
+  class: foreign
+  targetName: "void*"

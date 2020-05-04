@@ -1,0 +1,76 @@
+digraph G {
+subgraph cluster_0 {
+style="rounded,filled";
+label="main";
+fillcolor="lightgrey";
+subgraph cluster_1 {
+style="rounded,filled";
+label="sfarm_1";
+fillcolor="white";
+subgraph cluster_2 {
+style="rounded,filled";
+label="fred_1";
+fillcolor="white";
+subgraph cluster_3 {
+style="rounded,filled";
+label="mulacc";
+fillcolor="lightgrey";
+n4[shape="invtriangle",fixedsize="shape",label="in2"];
+n5[shape="invtriangle",fixedsize="shape",label="in1"];
+n6[shape="triangle",fixedsize="shape",label="out"];
+n7[shape="invtriangle",fixedsize="shape",label="acc"];
+
+}
+n8[shape="triangle",fixedsize="shape",label="out10"];
+n9[shape="ellipse",label="_it0"];
+n10[shape="parallelogram",label="iterate_over"];
+n11[shape="ellipse",label="_acc"];
+n12[shape="invtriangle",fixedsize="shape",label="size1"];
+n13[shape="invtriangle",fixedsize="shape",label="in2"];
+n14[shape="invtriangle",fixedsize="shape",label="in10"];
+n14 -> n5;
+n13 -> n4;
+n11 -> n7;
+n8 -> n6;
+
+}
+n15[shape="triangle",fixedsize="shape",label="out1"];
+n16[shape="ellipse",label="_it"];
+n17[shape="parallelogram",label="iterate_over"];
+n18[shape="ellipse",label="COEF"];
+n19[shape="ellipse",label="_range"];
+n20[shape="invtriangle",fixedsize="shape",label="in1"];
+n20 -> n14;
+n18 -> n13;
+n15 -> n8;
+
+}
+subgraph cluster_21 {
+style="rounded,filled";
+label="IO.Std.ScanfArray";
+fillcolor="white";
+n22[shape="parallelogram",label="format"];
+n23[shape="parallelogram",label="arg"];
+
+}
+subgraph cluster_24 {
+style="rounded,filled";
+label="IO.Std.PrintfArray";
+fillcolor="white";
+n25[shape="parallelogram",label="format"];
+n26[shape="parallelogram",label="arg"];
+
+}
+n27[shape="parallelogram",label="__readio0"];
+n28[shape="parallelogram",label="myformat"];
+n29[shape="parallelogram",label="schedule"];
+n30[shape="ellipse",label="input"];
+n31[shape="ellipse",label="output"];
+n30 -> n20;
+n31 -> n15;
+n30 -> n23;
+n31 -> n26;
+
+}
+
+}

@@ -1,0 +1,70 @@
+pattern:
+- name: main
+  type: Generic.Composite.Infinite
+  port:
+  - {name: input,  kind: var, type: ArrInt10}
+  - {name: output, kind: var, type: ArrInt10}
+  parameter:
+  - {name: schedule, value: [readio, exec, writeio]}
+  - {name: myformat, value: "\"%d\""} # TEST
+  instance:
+  - placeholder: readio
+    component: IO.Std.ScanfArray
+    inline: true
+    bind:
+    - {replace: _format, withParam: "\"%d\""}
+    - {replace: arg, with: input}
+  - placeholder: writeio
+    component: IO.Std.PrintfArray
+    inline: true
+    bind:
+    - {replace: _format, with: myformat }
+    - {replace: arg, with: output}
+  - placeholder: exec
+    component: sfarm_1
+    inline: true
+    bind:
+    - {replace: in1, with: input}
+    - {replace: out1, with: output}
+
+# skeletons have an optional 'size' argument for each input array. If not declared, it is inferred from the type. Only templates operate on it. If declared as port, then it will be treated as such (iarg)
+- name: sfarm_1
+  type: Skeleton.ShiftFarm
+  port:
+  - {name: in1,   kind: iarg.1, type: ArrInt10}
+  - {name: out1,  kind: oarg.2, type: ArrInt10}
+  - {name: COEF,  kind: var,  type: ArrInt5, value: "{1,2,4,3,2}"}
+  - {name: _it,   kind: var, type: UInt}
+  - {name: _range, kind: var, type: UInt}
+  parameter:
+  - {name: iterate_over, value: [in1]}
+  instance:
+  - placeholder: f
+    component: fred_1
+    inline: true
+    bind:
+    - {replace: in1, with: in1}   # rebind by template 
+    - {replace: in2, with: COEF}
+    - {replace: out1, with: out1, usage: "{{ out1._name }}[{{ _it._name }}]"} 
+
+# iterators are passed through intermediate variables, controlled through a "via" parameter.
+    
+- name: fred_1
+  type: Skeleton.FarmReduce.Init+Fused+ExpSize
+  port:
+  - {name: in1,   kind: iarg.2, type: ArrInt_fred1}
+  - {name: in2,   kind: iarg.3, type: ArrInt5}
+  - {name: size1, kind: iarg.4, type: UInt}
+  - {name: out1,  kind: oarg.1, type: ArrInt10}
+  - {name: _acc,  kind: var,  type: Int, value: "0"}
+  - {name: _it,   kind: var,  type: UInt}
+  parameter:
+  - {name: iterate_over, value: [in1,in2]}
+  instance:
+  - placeholder: f
+    component: mulacc
+    bind:
+    - {replace: in1, with: in1}  # inferred j + i
+    - {replace: in2, with: in2}  # inferred j
+    - {replace: acc, with: _acc}
+    - {replace: out, with: out1} # inferred j

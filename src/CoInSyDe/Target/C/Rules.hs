@@ -2,6 +2,7 @@
 module CoInSyDe.Target.C.Rules  where
 
 import           Control.Arrow ((&&&))
+import           Control.Monad ((>=>))
 import           Control.Monad.State.Lazy (get)
 import           Data.ByteString.Lazy as S (fromStrict)
 import           Data.Either
@@ -190,7 +191,7 @@ pVarInit (Var n k ty v)         =                -- type a = value
 -- +---------+-------+--------+--------+--------+---------+
 -- |         | InArg | OutArg | RetArg | LocVar | GlobVar |
 -- +=========+=======+========+========+========+=========+
--- | void    | X     | X      | ""     | X      | X       |
+-- | void    | X     | X      | X      | X      | X       |
 -- +---------+-------+--------+--------+--------+---------+
 -- | prim    | a     | &a     | a      | a      | a       |
 -- +---------+-------+--------+--------+--------+---------+
@@ -207,30 +208,16 @@ pVarInit (Var n k ty v)         =                -- type a = value
 -- generate the actual code. This template is passed through a binding, or, in the
 -- case of foreign types, in the definition.
 pVarBind :: Port C -> CGen (Doc ())
--- pVarBind (Var n LocVar ty v)    = varError "bind from argument" n LocVar (tyId ty) 
--- pVarBind (Var n GlobVar ty v)   = varError "bind from argument" n GlobVar (tyId ty) 
-pVarBind (Var n k (NoTy tyn) v) = case k of
-  RetArg   -> return emptyDoc                               -- ""
-  _        -> varError "bind from argument" n k "void"      -- !!! 
-pVarBind (Var n k (PrimTy tyId tyn) v) = case k of          -- ¤¤¤ PRIMITIVE ¤¤¤
-  OutArg _ -> return $ "&" <> pretty n                      -- "&a" 
-  RetArg   -> return $ pretty n <> space                    -- "a "
-  _        -> return $ pretty n                             -- "a" 
-pVarBind (Var n k (EnumTy tyId tyn _) v) = case k of        -- ¤¤ ENUMERATION ¤¤¤
-  OutArg _ -> return $ "&" <> pretty n                      -- "&a" 
-  RetArg   -> return $ pretty n <> space                    -- "a "
-  _        -> return $ pretty n                             -- "a"  
-pVarBind (Var n k (StrucTy tyId tyn _) v) = case k of       -- ¤¤¤ STRUCTURE ¤¤¤¤
-  OutArg _ -> return $ "&" <> pretty n                      -- "&a" 
-  RetArg   -> return $ pretty n <> space                    -- "a "
-  _        -> return $ pretty n                             -- "a"  
-pVarBind (Var n k (ArrTy tyId tyn _ s) v) = case k of       -- ¤¤¤¤¤ ARRAY ¤¤¤¤¤¤
-  RetArg   -> varError "bind from argument" n k tyId        -- !!!
-  _        -> return $ pretty n                             -- a  
-pVarBind (Var n k (Foreign tyId tyn iu ou _) v) = case k of -- ¤¤¤¤ FOREIGN ¤¤¤¤¤
-  OutArg _ -> return $ pretty $ if T.null ou then n else ou -- "a?"
-  RetArg   -> return $ pretty (if T.null iu then n else iu) <> space
-  _        -> return $ pretty $ if T.null iu then n else iu -- a? 
+pVarBind (Var n k (NoTy tyn) v) = varError "bind from argument" n k "void"
+pVarBind (Var n k@OutArg{} ty v) = case ty of
+  (ArrTy tyId tyn _ s) -> varError "bind from argument" n k tyId
+  (PrimTy tyId tyn)    -> return $ "&" <> pretty n
+  (EnumTy tyId tyn _)  -> return $ "&" <> pretty n
+  (StrucTy tyId tyn _) -> return $ "&" <> pretty n
+pVarBind (Var n k (Foreign tyId tyn iu ou _) v) = case k of 
+  OutArg _ -> return $ pretty $ if T.null ou then n else ou
+  _        -> return $ pretty $ if T.null iu then n else iu 
+pVarBind (Var n k ty v) = return $ pretty n
 
 -- | Generates base names for code template usage. Implements LUT:
 -- 
@@ -357,17 +344,19 @@ pFunCode boundIfs = do
 
 pFunCall :: IfMap C -> CGen [Doc ()]
 pFunCall reboundParentIfs = do
-  cp    <- getCp
+  cp     <- getCp
+  layout <- layoutOpts <$> get
   (retId,argsIds) <- ((fmap fst . ret) &&& (map fst . args)) <$> categorize (cpIfs cp)
-  bRet  <- maybe (return (nullId,TPort voidVar Nothing)) getBoundIf retId >>= usage
-  bArgs <- mapM getBoundIf argsIds >>= mapM usage
-  let template   = ysrcFromText $ renderStrict $ layoutCompact
-                   $ bRet <> pretty (cpName cp) <> sepArg bArgs
+  bRet   <- maybe (return emptyDoc) (getBoundIf >=> fmap addEquals . usage) retId 
+  bArgs  <- mapM getBoundIf argsIds >>= mapM usage
+  let template   = ysrcFromText $ renderStrict $ layoutPretty layout
+                   $ bRet <> pretty (cpName cp) <> sepArg bArgs <> semi
       dictionary = M.mapWithKey ifToYAML reboundParentIfs
       context    = mkGingerContext template dictionary (\_ _ -> Right "")
-  text <- fromTemplate context template :: CGen Text
+  text   <- fromTemplate context template :: CGen Text
   return [pretty text]
   where
+    addEquals    = (<+> (equals <> space))
     getBoundIf i = either
                    (genError . (++) "... during instanciation of function call\n")
                    (return . (,) i) $ reboundParentIfs !~ i

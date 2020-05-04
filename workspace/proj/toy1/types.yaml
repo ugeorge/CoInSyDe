@@ -1,0 +1,5 @@
+type:
+- {name: ArrInt10, class: array, targetName: int, baseType: Int, size: 10}
+- {name: ArrInt5, class: array, targetName: int, baseType: Int, size: 5}
+- {name: ArrInt_fred1, class: array, targetName: int, baseType: Int, sizeFrom: "size"}
+- {name: PtrInt, class: foreign, targetName: int, callPrefix: "*", bindPrefix: "*"}

@@ -13,7 +13,7 @@ import qualified Data.Text as T
 import           Data.YAML (Node, Pos(..))
 import           Text.Ginger
 import           Text.Ginger.GVal
-import           Text.Ginger.Run.Type (GingerContext (..),throwHere)
+import           Text.Ginger.Run.Type (GingerContext (..),throwHere,getSourcePos)
 import           Text.Ginger.Run.VM
 
 import           CoInSyDe.Internal.YAML
@@ -63,8 +63,15 @@ mkGingerContext :: YSrcCode      -- ^ the template source structure
 mkGingerContext srcdoc usrDict phFun = makeContextTextExM look write except
   where
     look :: VarName
-         -> Run SourcePos GWriter Text (GVal (Run SourcePos GWriter Text))
-    look k = return $ toGVal $ contextDict !? k
+         -> GRunner (GVal (Run SourcePos GWriter Text))
+    look k = case contextDict !? k of
+      Just val -> return $ toGVal val
+      Nothing -> do
+        offs <- (sourceLine &&& sourceColumn) <$> getSourcePos
+        let msg = " Cannot find key " ++ show k ++ " in dictionary\n"
+                  ++ prettyYNode (toYAML usrDict)
+        _ <- liftRun2 tellG $ Left $ prettyYSrcWithOffset srcdoc msg offs
+        return def
 
     write :: Text -> GWriter ()
     write = tellG . Right
@@ -73,7 +80,7 @@ mkGingerContext srcdoc usrDict phFun = makeContextTextExM look write except
     except e@(RuntimeErrorAt p (IndexError i)) = tellG $ Left $
       T.unpack (runtimeErrorWhat e) ++ " at " ++
       concatMap (prettyYSrcWithOffset srcdoc msg) (getOffset e)
-      where msg = " Cannot find key " ++ show i ++ " in dictionary\n"
+      where msg = " Cannot find key " ++ T.unpack i ++ " in dictionary\n"
                   ++ prettyYNode (toYAML usrDict)
     except e = tellG $ Left $
       T.unpack (runtimeErrorWhat e) ++ " at " ++

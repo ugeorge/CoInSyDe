@@ -1,0 +1,138 @@
+pattern:
+- name: source
+  type: process_sdf
+  interface:
+  - {name: pdata, class: iarg, type: VoidPointer}
+  - {name: obuff, class: port, type: ArrayInt2}
+  - {name: st, class: state, type: Int, value: '0'}
+  - {name: schedule, class: param, value: [ns_func,os_delay]}
+  - {name: oPortBinds, class: param, value:
+       [{buff: obuff, queue: top_main_s2p1, prod: 2}]}
+  instance:
+  - placeholder: ns_func
+    component: source_func
+    bind:
+    - {replace: 1_ret,   with: obuff}
+    - {replace: 2_state, with: st}
+  - placeholder: os_delay
+    component: OSTimeDlyHMSM
+    bind:
+    - {replace: 1_hours,   withText: '0'}
+    - {replace: 2_minutes, withText: '0'}
+    - {replace: 3_seconds, withText: '1'}
+    - {replace: 4_miliseconds, withText: '0'}
+
+- name: p1
+  type: comb_sdf
+  interface:
+  - {name: pdata, class: iarg, type: VoidPointer}
+  - {name: ibuff, class: port, type: ArrayInt3}
+  - {name: obuff, class: port, type: ArrayInt1}
+  - {name: iPortBinds, class: param, value:
+      [{buff: ibuff, queue: top_main_s2p1, cons: 3}]}
+  - {name: oPortBinds, class: param, value:
+      [{buff: obuff, queue: top_main_p12s, prod: 1}]}
+  instance:
+  - placeholder: func
+    component: dummy_func
+    bind:
+    - {replace: 2_arg, with: ibuff}
+    - {replace: 1_ret, with: obuff}
+
+- name: sink
+  type: comb_sdf
+  interface:
+  - {name: pdata, class: iarg, type: VoidPointer}
+  - {name: ibuff, class: var, type: ArrayInt2}
+  - {name: iPortBinds, class: param, value:
+      [{buff: ibuff, queue: top_main_p12s, cons: 2}]}
+  instance:
+  - placeholder: func
+    component: sink_func
+    bind:
+     - {replace: 1_arg, with: ibuff}
+
+- name: top_main
+  type: ucosii_main
+  interface:
+  - {name: TaskStack, class: state, type: StackArray1024}
+  # Macro passed to the template
+  - {name: Task, class: param, value: init}
+  # queue arrays
+  - {name: s2p1_array, class: state, type: VoidArray6}
+  - {name: p12s_array, class: state, type: VoidArray2}
+  # queues
+  - {name: s2p1, class: state, type: OS_EVENT, constructor: queueInit0}
+  - {name: p12s, class: state, type: OS_EVENT, constructor: queueInit1}
+  instance:
+  - placeholder: call_tasks
+    component: init
+  - placeholder: queueInit0
+    component: OSQCreate
+    bind:
+    - {replace: 1_startArray, with: s2p1_array}
+    - {replace: 2_size, withText: '6'}
+  - placeholder: queueInit1
+    component: OSQCreate
+    bind:
+    - {replace: 1_startArray, with: p12s_array}
+    - {replace: 2_size, withText: '2'}
+
+- name: init
+  type: ucosii_call_task
+  interface:
+  - {name: pdata, class: iarg, type: VoidPointer}
+  # stacks
+  - {name: sourceStk, class: state, type: StackArray1024}
+  - {name: p1Stk, class: state, type: StackArray1024}
+  - {name: sinkStk, class: state, type: StackArray1024}
+  # template parameters
+  # prios are extremely important!!! Receivers need to have higher prio than senders
+  # because of non-blocking write.
+  - {name: tasks, class: param, value:
+        [{name: source, prio: 15, stack: sourceStk},
+         {name: p1,     prio: 13, stack: p1Stk},
+         {name: sink,   prio: 11, stack: sinkStk}]}
+  instance:
+  - placeholder: dummy1 # no template function call, but triggers CoInSyDe to 
+    component: source   # generate the function definition for these components
+  - placeholder: dummy2
+    component: p1
+  - placeholder: dummy3
+    component: sink
+    
+type:
+- name: StackArray1024
+  class: array
+  parameter:
+  - {name: baseType, value: OS_STK}
+  - {name: size, value: '1024'}
+- name: VoidArray6
+  class: array
+  parameter:
+  - {name: baseType, value: VoidPointer}
+  - {name: size, value: '6'}
+- name: VoidArray2
+  class: array
+  parameter:
+  - {name: baseType, value: VoidPointer}
+  - {name: size, value: '2'}
+  
+native:    
+- name: source_func
+  interface:
+  - {name: 2_state, class: iarg, type: Int}
+  - {name: 1_ret, class: oarg, type: Int}
+  requirement: {include: "lib/funcs_sdf.c"}
+
+- name: dummy_func
+  interface:
+  - {name: 2_arg, class: iarg, type: Int}
+  - {name: 1_ret, class: oarg, type: Int}
+  requirement: {include: "lib/funcs_sdf.c"}
+
+- name: sink_func
+  interface: {name: 1_arg, class: iarg, type: Int}
+  requirement:
+  - include: "stdio.h"
+  - include: "lib/funcs_sdf.c"
