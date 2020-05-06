@@ -43,9 +43,10 @@ pattern:
     component: fred_1
     inline: true
     bind:
-    - {replace: in1, with: in1}   # rebind by template 
+    - {replace: in1, with: in1, usage: "(n) -> concat(n,\"+\",_it._name)"}   # rebind by template 
     - {replace: in2, with: COEF}
-    - {replace: out1, with: out1, usage: "{{ out1._name }}[{{ _it._name }}]"} 
+    - {replace: size1, with: _range}
+    - {replace: out1, with: out1, usage: "(n) -> concat(n,\"[\",_it._name,\"]\")"} 
 
 # iterators are passed through intermediate variables, controlled through a "via" parameter.
     
@@ -55,16 +56,23 @@ pattern:
   - {name: in1,   kind: iarg.2, type: ArrInt_fred1}
   - {name: in2,   kind: iarg.3, type: ArrInt5}
   - {name: size1, kind: iarg.4, type: UInt}
-  - {name: out1,  kind: oarg.1, type: ArrInt10}
+  - {name: out1,  kind: oarg.1, type: Int}
   - {name: _acc,  kind: var,  type: Int, value: "0"}
   - {name: _it,   kind: var,  type: UInt}
   parameter:
-  - {name: iterate_over, value: [in1,in2]}
+  - name: iterate_over
+    value:
+      in1: {_callback: size1, range: "{{_name}}"}
+      in2:
   instance:
   - placeholder: f
     component: mulacc
     bind:
-    - {replace: in1, with: in1}  # inferred j + i
-    - {replace: in2, with: in2}  # inferred j
+    - replace: in1
+      with: in1
+      usage: "(n) -> concat(\"(\",n,\")[\",_it._name,\"]\")"
+    - replace: in2
+      with: in2
+      usage: "(n) -> concat(n,\"[\",_it._name,\"]\")"
     - {replace: acc, with: _acc}
-    - {replace: out, with: out1} # inferred j
+    - {replace: out, with: _acc}

@@ -2,9 +2,10 @@
 module CoInSyDe.Target.C.Rules  where
 
 import           Control.Arrow ((&&&),second)
-import           Control.Monad ((>=>))
+import           Control.Monad ((>=>),forM)
 import           Control.Monad.State.Lazy (get)
 import           Data.ByteString.Lazy as S (fromStrict)
+import           Data.Default
 import           Data.Either
 import qualified Data.HashMap.Strict as M
 import           Data.List (sortOn)
@@ -207,17 +208,30 @@ pVarInit (Var n k ty v)         =                -- type a = value
 -- Nore: @?@ denotes that usage will be replaced with a Ginger template which will
 -- generate the actual code. This template is passed through a binding, or, in the
 -- case of foreign types, in the definition.
-pVarBind :: If C -> CGen Text
-pVarBind Param{} = return "{{value}}"
-pVarBind (TPort Var{..}) = case (pKind, pTy) of
+pVarBind :: Port C -> CGen Text
+-- pVarUse Param{} = return "{{value}}"
+pVarBind Var{..} = case (pKind, pTy) of
   (_, NoTy{})                   -> varError "bind from argument" pName pKind "void"
   (RetArg{}, ArrTy tyId _ _ _)  -> varError "bind from argument" pName pKind tyId
-  (OutArg{}, PrimTy{})          -> return "&{{_name}}" 
-  (OutArg{}, EnumTy{})          -> return "&{{_name}}"
-  (OutArg{}, StrucTy{})         -> return "&{{_name}}"
-  (OutArg{}, Foreign _ _ i o _) -> return $ o <> "{{_name}}"
-  (_,        Foreign _ _ i o _) -> return $ i <> "{{_name}}"
-  (_, _)                        -> return  "{{_name}}"
+  (OutArg{}, PrimTy{})          -> return $ "&" <> pName 
+  (OutArg{}, EnumTy{})          -> return $ "&" <> pName
+  (OutArg{}, StrucTy{})         -> return $ "&" <> pName
+  (OutArg{}, Foreign _ _ i o _) -> return $ o <> pName
+  (_,        Foreign _ _ i o _) -> return $ i <> pName
+  (_, _)                        -> return pName
+
+
+-- pVarBind :: If C -> CGen Text
+-- pVarBind Param{} = return "{{value}}"
+-- pVarBind (TPort Var{..}) = case (pKind, pTy) of
+--   (_, NoTy{})                   -> varError "bind from argument" pName pKind "void"
+--   (RetArg{}, ArrTy tyId _ _ _)  -> varError "bind from argument" pName pKind tyId
+--   (OutArg{}, PrimTy{})          -> return "&{{_name}}" 
+--   (OutArg{}, EnumTy{})          -> return "&{{_name}}"
+--   (OutArg{}, StrucTy{})         -> return "&{{_name}}"
+--   (OutArg{}, Foreign _ _ i o _) -> return $ o <> "{{_name}}"
+--   (_,        Foreign _ _ i o _) -> return $ i <> "{{_name}}"
+--   (_, _)                        -> return  "{{_name}}"
 
 -- | Generates base names for code template usage. Implements LUT:
 -- 
@@ -269,7 +283,7 @@ pMainDef globSts = do
   sif  <- categorize (cpIfs cp)
   sanity sif cp
   vars <- mapM (fmap (<>semi) . pVarInit) globSts
-  code <- pFunCode M.empty (cpIfs cp)
+  code <- pFunCode (cpIfs cp)
   return $ header <+> cBraces (vars ++ code)
   where
     header = "int main(int argc, char ** argv)"
@@ -288,81 +302,80 @@ pFunDef = do
   let header = retA <+> pretty (cpName cp) <+> sepArg args
   ---- body ----
   body <- case cp of
-            TmComp{} -> pFunCode M.empty (cpIfs cp)
+            TmComp{} -> pFunCode (cpIfs cp)
             NvComp{} -> maybe
                         (genError "Cannot expand native code which was not given!")
                         (return . (:[]) . pretty) (cpCode cp)
   return $ header <+> cBraces body
 
 pFunCode :: IfMap C -> CGen [Doc ()]
-pFunCode parentMeta boundIfs = do
+pFunCode boundIfs = do
   let msg = "... during interface rebinding in function code expantion\n"
   cp     <- getCp
   layout <- layoutOpts <$> get
   st     <- get
-  ------------------------
+  -- internal variable initializations ----------------------
   sif  <- categorize (cpIfs cp)
   vars <- mapM (fmap (<>semi) . pVarInit . snd) (maybeToList (ret sif) ++ var sif)
   retS <- return  $ maybe emptyDoc
           (\a -> "return" <+> pretty (pName a) <> semi) (snd <$> ret sif)
-  ------------------------
-  let preamble = "{% macro use(a) %}{{ _use[a] }}{% endmacro %}\n"
-  usemeta <- toYAML <$> mapM pVarUse (M.fromList $ ports sif)
-  ------------------------
-  let scopedIfs  = boundIfs `M.union` cpIfs cp     
-      dictionary = M.unionWith combineNode parentMeta   -- >
-                   $ M.insert "_use" usemeta            -- >
-                   $ M.mapWithKey ifToYAML scopedIfs    --
-      template   = (cpTpl cp) { yPreamble = preamble }
+  -- Compiling new instance names ----------------------
+  let scopedIfs = boundIfs `M.union` cpIfs cp
+  reboundIfs <- forM (cpRefs cp) $ \ref -> do
+    boundWithUsage <- either genError return $ updateOnBind scopedIfs (refBinds ref)
+    updatedNames <- mapM (\(i,(b,u)) -> maybe (return (i,b))
+                           (bindRename scopedIfs i b) u) $ M.toList boundWithUsage
+    return $ M.fromList updatedNames
+  -- building template context ----------------------
+  useScopedIfs <- mapM applyPVarUse scopedIfs
+  let template   = (cpTpl cp) -- { yPreamble = "" }
+      dictionary = M.mapWithKey ifToYAML useScopedIfs
       genFun :: Id -> Map Text -> Either String [Doc ()]
-      genFun n tplArgs
+      genFun n _
         | isNothing inst = Left $ "Did not find placeholder " ++ show n ++ "!"
-        | rInline        = generator pFunCode <$> tplMeta <*> newBinds
-        | otherwise      = generator pFunCall <$> tplMeta <*> newBinds
+        | rInline        = Right $ spawnGen st rId (pFunCode newBinds)
+        | otherwise      = Right $ spawnGen st rId (pFunCall newBinds)
         where inst = cpRefs cp !? n
               (Ref rId rInline rBinds) = fromJust inst
-              nodesMeta = map (\(i,v) -> (,) i <$> parseYText v) $ M.toList tplArgs
-              tplMeta   = case partitionEithers nodesMeta of
-                ([],n) -> Right $ M.fromList n
-                (e,_)  -> Left $ concat e
-              newBinds = updateOnBind scopedIfs rBinds
-              generator f a b = spawnGen st rId (f a b)
-              
+              newBinds = reboundIfs M.! n
+  -- expanding template ----------------------              
   let phFun n args = renderStrict . removeTrailingWhitespace . -- TODO: fix indent
                      layoutPretty layout . indent 2 . vsep <$> genFun n args
       context = mkGingerContext template dictionary phFun
    
   code <- fromTemplate context template
   return $ vars ++ map pretty (T.lines $ T.strip code) ++ [retS]
+  where  applyPVarUse (TPort a) = (\n -> TPort (a { pName = n})) <$> pVarUse a
+         applyPVarUse param     = return param
 
-pFunCall :: Map (Node ()) -> IfMap C -> CGen [Doc ()]
-pFunCall parentMeta boundIfs = do
+
+pFunCall :: IfMap C -> CGen [Doc ()]
+pFunCall boundIfs = do
   cp     <- getCp
-  layout <- layoutOpts <$> get
-  ----------------------------
+  -- geting IDs of arguments --------------------------
   (retId,argsIds) <- ((fmap fst . ret) &&& (map fst . args)) <$> categorize (cpIfs cp)
-                     :: CGen (Maybe Id, [Id])
-  let retUse = maybe "" (\i -> "{{ use(\"" <> i <> "\") }} = " ) retId 
-      argUse = map (\i -> "{{ use(\"" <> i <> "\") }}" ) argsIds
   ----------------------------
-  bRet    <- mapM getBoundIf $ maybeToList retId 
-  bArgs   <- mapM getBoundIf argsIds
-  usemeta <- (toYAML . M.fromList) <$> mapM applyPVarBind (bRet ++ bArgs)
-  let preamble = "{% macro use(a) %}{{ eval(_use[a], port(a)) }}{% endmacro %}\n"
-  ----------------------------
-  let template   = ysrcFromText preamble
-                   $ retUse <> cpName cp <> "(" <> intercalate "," argUse <> ");"
-      dictionary = M.unionWith combineNode parentMeta   -- >
-                   $ M.insert "_use" usemeta            -- >
-                   $ M.mapWithKey ifToYAML boundIfs     --
-      context    = mkGingerContext template dictionary (\_ _ -> Right "")
-  text   <- fromTemplate context template :: CGen Text
-  return [pretty text]
-  where
-    applyPVarBind (i,v) = (,) i <$> pVarBind v
-    getBoundIf i = either
-                   (genError . (++) "... during instanciation of function call\n")
-                   (return . (,) i) $ boundIfs !~ i
+  bRet  <- mapM (getBoundIf >=> pVarUse) $ maybeToList retId 
+  bArgs <- mapM (getBoundIf >=> pVarBind) argsIds
+  let funCall = cat (map (\o -> pretty o <+> equals <> space) bRet)
+                <> pretty (cpName cp) <> sepArg (map pretty bArgs) <> semi
+  return [funCall]
+  where getBoundIf i =
+          either (genError . (++) "... during instanciation of function call\n")
+          (return . ifPort) $ boundIfs !~ i
 
 ----------------------------------------------------------------------
 
+bindRename :: IfMap C -> Id -> If C -> Text -> CGen (Id, If C)
+bindRename scopedIfs oId oIf usage = do
+  let template   = ysrcFromText "" $
+                   "{% set namebuild = " <> usage <> " %}\n" <>
+                   "{{ namebuild(" <> extractName oId oIf <> ") }}"
+      dictionary = M.mapWithKey ifToYAML scopedIfs
+      context    = mkGingerContext template dictionary (\_ _ -> Right "")
+  newName <- fromTemplate context template
+  return $ updateName oId oIf newName
+  where extractName _ (TPort a) = "\"" <> pName a <> "\"" 
+        extractName i (Param _) = i
+        updateName  i (TPort a) name = (i, TPort (a { pName = name }))
+        updateName  i (Param _) name = (i, TPort (def { pName = name })) 

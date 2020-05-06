@@ -63,20 +63,17 @@ return 0;
 //   - name: iterate_over
 //     value: ["array input port IDs"]
 //   code: |
-{% macro itrng1() %}{#
-#}{% for p in iterate_over %},{{port(p)._type._size}}{% endfor %}{#
-#}{% endmacro %}
+{{ setdef("iterate_over","{offset: 0, range: \"{{_type._size}}\"}") }}
 
-{% macro itrange() %}{#
-#}min({{slice(itrng1(), start=1, length=null)}}){#
-#}{% endmacro %}
+{% macro itrng1() %}
+{% for p in iterate_over %},{{eval(p.range, port(p._callback))}}{% endfor %}
+{% endmacro %}
 
-{% macro use(a) %}{{ eval(a._use, a) }}{% endmacro %}
+{% macro itrange() %}min({{slice(itrng1(), start=1, length=null)}}){% endmacro %}
 
-for ({{ use(_it) }} = 0; {{ _it._name }} < {{ itrange() }} ; {{ _it._name }}++){
+for ({{ _it._name }} = 0; {{ _it._name }} < {{ itrange() }} ; {{ _it._name }}++){
   {{ _range._name }} = {{ itrange() }} - {{ _it._name }};
-  {{ placeholder("f",
-		 "{replace: \"size1\", with: \"_range\"}") }}
+  {{ placeholder("f") }}
 }
 
 // - name: Skeleton.FarmReduce.Init+Fused+ExpSize
@@ -95,17 +92,15 @@ for ({{ use(_it) }} = 0; {{ _it._name }} < {{ itrange() }} ; {{ _it._name }}++){
 //   - name: iterate_over
 //     value: ["array input port IDs"]
 //   code: |
-{% macro itrng1() %}{#
-#}{% for p in iterate_over %},{{port(p)._type._size}}{% endfor %}{#
-#}{% endmacro %}
+{{ setdef("iterate_over","{offset: 0, range: \"{{_type._size}}\"}") }}
 
-{% macro itrange() %}{#
-#}min({{slice(itrng1(), start=1, length=null)}}){#
-#}{% endmacro %}
+{% macro itrng1() %}
+{% for p in iterate_over %},{{eval(p.range, port(p._callback))}}{% endfor %}
+{% endmacro %}
 
-{% macro use(a) %}{{ eval(a._use, a) }}{% endmacro %}
+{% macro itrange() %}min({{slice(itrng1(), start=1, length=null)}}){% endmacro %}
 
- for ({{ use(_it) }} = 0; {{ use(_it) }} < {{ itrange() }} ; {{ use(_it) }}++){
+for ({{ _it._name }} = 0; {{ _it._name }} < {{ itrange() }} ; {{ _it._name }}++){
   {{ placeholder("f") }}
 }
-
+{{ out1._name }} = {{ _acc._name }};

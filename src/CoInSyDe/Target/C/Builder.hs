@@ -227,7 +227,7 @@ dotBuilder standalone db n = case db !? n of
     case cp of
       NvComp{} -> return ()
       TmComp{} -> forM_ (M.toList $ cpRefs cp) $ \(ph,ref) ->
-        forM_ (refBinds ref) $ \(repl, with) ->
+        forM_ (refBinds ref) $ \(repl, with, _) ->
         case (M.lookup with pmap, M.lookup repl (maps ! refId ref)) of
           (Just src, Just dst) -> src .->. dst 
           _ -> return ()

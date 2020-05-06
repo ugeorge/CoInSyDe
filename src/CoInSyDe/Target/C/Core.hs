@@ -15,10 +15,11 @@
 module CoInSyDe.Target.C.Core where
 
 import Data.Binary (Binary)
+import Data.Default
 import Data.HashMap.Strict as M hiding (map,filter,foldr, null)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text, append, pack, unpack, breakOn, tail)
 import Data.Text.Read (decimal)
-import Data.Maybe (fromMaybe)
 import Data.YAML
 import GHC.Generics (Generic)
 import Text.Pandoc.Builder hiding (Target)
@@ -136,6 +137,12 @@ instance Binary Kind
 instance Binary (Type C)
 instance Binary (Port C)
 instance Binary (Requ C)
+
+instance Default (Type C) where
+  def = NoTy "void"
+
+instance Default (Port C) where
+  def = Var {pName = "", pKind = LocVar , pTy = def , pVal = Nothing }
 
 instance ToYAML (Type C) where
   toYAML (PrimTy i n)    = mapping [ "_name" .= n]
