@@ -116,7 +116,7 @@ updateRequirements rlist = unless (L.null rlist) $ do
 -- modifies variable name and updates type declarations, namespace, global
 -- variable space and requirements
 traversePort :: If C -> ProjBuilder (If C)
-traversePort (TPort p u) = do
+traversePort (TPort p) = do
   uname <- getUniqueName (pName p)
   let newp = p { pName = uname }
       ty   = pTy p
@@ -126,7 +126,7 @@ traversePort (TPort p u) = do
     modify $ \s -> s { typeDecls = M.insert (tyId ty) ty $ typeDecls s }
   when (isForeign ty) $
     updateRequirements $ tyRequ ty
-  return $ TPort newp u
+  return $ TPort newp
 traversePort p = return p
   
 -----------------------------------------------
@@ -210,24 +210,24 @@ dotBuilder standalone db n = case db !? n of
                   (\ref -> dotBuilder (not $ refInline ref) db (refId ref))
       
     ids <- forM (M.toList $ cpIfs cp) $ \(i,p) -> case p of
-      TPort (Var n (InArg _) _ _) _ -> liftM ((,) i)
+      TPort (Var n (InArg _) _ _) -> liftM ((,) i)
         $ node [("shape","invtriangle"),("fixedsize","shape"),("label",unpack n)]
-      TPort (Var n (OutArg _) _ _) _ -> liftM ((,) i)
+      TPort (Var n (OutArg _) _ _) -> liftM ((,) i)
         $ node [("shape","triangle"),("fixedsize","shape"),("label",unpack n)]
-      TPort (Var n GlobVar _ _) _ -> liftM ((,) i)
+      TPort (Var n GlobVar _ _) -> liftM ((,) i)
         $ node [("shape","doubleoctagon"),("label",unpack n)]
-      TPort (Var n LocVar _ _) _ -> liftM ((,) i)
+      TPort (Var n LocVar _ _) -> liftM ((,) i)
         $ node [("shape","ellipse"),("label",unpack n)]
-      TPort (Var n RetArg _ _) _ -> liftM ((,) i)
+      TPort (Var n RetArg _ _) -> liftM ((,) i)
         $ node [("shape","triangle"),("fixedsize","shape"),("label",unpack n)]
-      Param _ _ -> liftM ((,) i)
+      Param _ -> liftM ((,) i)
         $ node [("shape","parallelogram"),("label",unpack i)]
     let pmap = M.fromList ids
 
     case cp of
       NvComp{} -> return ()
       TmComp{} -> forM_ (M.toList $ cpRefs cp) $ \(ph,ref) ->
-        forM_ (refBinds ref) $ \(repl, with, _) ->
+        forM_ (refBinds ref) $ \(repl, with) ->
         case (M.lookup with pmap, M.lookup repl (maps ! refId ref)) of
           (Just src, Just dst) -> src .->. dst 
           _ -> return ()

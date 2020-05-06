@@ -4,16 +4,18 @@ module CoInSyDe.Internal.Ginger (
   mkPlaceholderFun, rangeFun, portLookupFun
   ) where
 
-import           Control.Arrow ((&&&))
+import           Control.Arrow (second,(&&&))
+import           Control.Monad.State (gets)
 import           Control.Monad.Writer.Lazy
 import           Data.Default
+import           Data.Either
 import qualified Data.HashMap.Strict as M
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.YAML (Node, Pos(..))
 import           Text.Ginger
 import           Text.Ginger.GVal
-import           Text.Ginger.Run.Type (GingerContext (..),throwHere,getSourcePos)
+import           Text.Ginger.Run.Type
 import           Text.Ginger.Run.VM
 
 import           CoInSyDe.Internal.YAML
@@ -42,36 +44,19 @@ tellG  = tell . Acc
 newG x = writer (T.empty, Acc x)
 execG  = getAccum . execWriter
 
--- | Makes a template placeholder function from a target function @\ id arglist@. This
--- function uses only positional arguments.
-mkPlaceholderFun :: YSrcCode -> (Text -> [Text] -> Either String Text)
-                 -> Function GRunner
-mkPlaceholderFun src f xs = do
-  let (name:args) =  map (asText . snd) xs
-      msg = "PlaceholderError at " ++ show (ysrcPath src)
-            ++ " (" ++ show (posLine $ ysrcPos src) ++ ":"
-            ++ show (posColumn $ ysrcPos src) ++ ")\n"
-  transformed <- return $ either (Left . (++) msg) Right $ f name args
-  _ <- liftRun2 newG transformed
-  return def
-
 mkGingerContext :: YSrcCode      -- ^ the template source structure
                 -> Map (Node ()) -- ^ built YAML dictionary
-                -> (Text -> [Text] -> Either String Text)
+                -> (Text -> Map Text -> Either String Text)
                 -- ^ placeholder expander function defined by the target
                 -> GContext      -- ^ Ginger context
 mkGingerContext srcdoc usrDict phFun = makeContextTextExM look write except
   where
-    look :: VarName
-         -> GRunner (GVal (Run SourcePos GWriter Text))
+    look :: VarName -> GRunner (GVal GRunner)
     look k = case contextDict !? k of
       Just val -> return $ toGVal val
-      Nothing -> do
-        offs <- (sourceLine &&& sourceColumn) <$> getSourcePos
-        let msg = " Cannot find key " ++ show k ++ " in dictionary\n"
-                  ++ prettyYNode (toYAML usrDict)
-        _ <- liftRun2 tellG $ Left $ prettyYSrcWithOffset srcdoc msg offs
-        return def
+      Nothing -> usrError srcdoc msg
+        where msg = " Cannot find key " ++ show k ++ " in dictionary\n"
+                    ++ prettyYNode (toYAML usrDict)
 
     write :: Text -> GWriter ()
     write = tellG . Right
@@ -91,19 +76,59 @@ mkGingerContext srcdoc usrDict phFun = makeContextTextExM look write except
     contextDict =
       M.insert "placeholder" (fromFunction $ mkPlaceholderFun srcdoc phFun) $
       M.insert "range"       (fromFunction rangeFun) $
-      M.insert "port"        (fromFunction portLookupFun) $
+      M.insert "port"        (fromFunction $ portLookupFun srcdoc) $
+      M.insert "exists"      (fromFunction $ existsFun srcdoc) $
+      -- M.insert "reeval"      (fromFunction $ reEvalFun srcdoc) $
+      M.insert "setdef"      (fromFunction $ setMetaFun srcdoc) $
       M.map toGVal usrDict
 
 getOffset = map (sourceLine &&& sourceColumn) . runtimeErrorWhere 
 
+usrError srcdoc msg = do
+  offs <- (sourceLine &&& sourceColumn) <$> getSourcePos
+  _ <- liftRun2 tellG $ Left $ prettyYSrcWithOffset srcdoc msg offs
+  return def
+  
 ------------------------------------------------------------------    
 
+-- TODO: "tell" errors, do not throw them
+
+-- | Makes a template placeholder function from a target function @\ id arglist@. This
+-- function uses only positional arguments.
+mkPlaceholderFun :: YSrcCode -> (Text -> Map Text -> Either String Text)
+                 -> Function GRunner
+mkPlaceholderFun src f xs = do
+  let (_,(name:_),args) =  matchFuncArgs [] xs
+      msg = "PlaceholderError at " ++ show (ysrcPath src)
+            ++ " (" ++ show (posLine $ ysrcPos src) ++ ":"
+            ++ show (posColumn $ ysrcPos src) ++ ")\n"
+  res <- return $ either (Left . (++) msg) Right $ f (asText name) (fmap asText args)
+  _ <- liftRun2 newG res
+  return def
+
+
+-- reEvalFun :: YSrcCode -> Function GRunner
+-- reEvalFun _ [] = throwHere $ ArgumentsError (Just "range") "called with no arguments!"
+-- reEvalFun doc [_] = usrError doc "No default value set!"
+-- reEvalFun  doc ((_,expr):(_,ctxvar):_) = do
+--   context    <- gets rsScope
+--   let newCtx = case asDictItems ctxvar of
+--         Nothing   -> fmap toGVal context
+--         Just vars -> M.fromList vars `M.union` fmap toGVal context
+--       contextLookup k = maybe (error "!!!!") return $ M.lookup k newCtx
+--   let template = T.unpack $ asText expr
+--       options  = mkParserOptions (\_ -> return Nothing)
+--       errParse = error . formatParserError (Just template)  -- TODO
+--   ginger <- either errParse return =<< parseGinger' options template
+--   return $ toGVal $ runGinger (makeContextTextM contextLookup (tellG . Right)) ginger
+
+  
 -- | Template range function called with @range@. Usage:
 --
 -- > range (from = 0, step = 1, <to>)
 --
 -- where @<to>@ is mandatory and needs to be an integer.
-rangeFun :: Monad m => Function (Run p m h)
+rangeFun :: Function GRunner
 rangeFun [] = throwHere $ ArgumentsError (Just "range") "called with no arguments!"
 rangeFun args = do
   when (null pArgs) $ throwHere $ ArgumentsError (Just "range") "Range not given!"
@@ -122,9 +147,58 @@ rangeFun args = do
 -- result of a prior expression. Usage.
 --
 -- > port(key)
-portLookupFun :: Monad m => Function (Run p m h)
-portLookupFun [] = throwHere $ ArgumentsError (Just "port") "called with no argument!"
-portLookupFun ((_,x):_) = do
+portLookupFun :: YSrcCode -> Function GRunner
+portLookupFun doc [] = usrError doc "Function called with no argument!"
+portLookupFun _ ((_,x):_) = do
   context <- getVar (asText x)
   return $ toGVal context
+
+existsFun :: YSrcCode -> Function GRunner
+existsFun doc [] = usrError doc "Function called with no argument!"
+existsFun _ ((_,x):_) = do
+  vars <- gets rsScope
+  case M.lookup (asText x) vars of
+    Nothing -> return $ toGVal False
+    _  -> return $ toGVal True
+
+
+
+setMetaFun :: YSrcCode -> Function GRunner
+setMetaFun doc []  = usrError doc "Function called with no argument!"
+setMetaFun doc [_] = usrError doc "No default value set!"
+setMetaFun doc ((_,x):(_,deft):_) = do
+  let keyname = asText x
+  var <- getVar keyname 
+  case (asDictItems var,asList var) of
+    (Nothing,Nothing) -> usrError doc $ "Parameter "++ show x ++" is not a dictionary"
+    (Just metadict,_) -> case toGVal <$> parseYText (asText deft) of
+      Left e  -> usrError doc e
+      Right v -> do let newmeta = M.fromList $ map (injectGVal v) metadict
+                    setVar keyname $ toGVal newmeta
+                    return def
+    (_,Just metalist) -> case toGVal <$> parseYText (asText deft) of
+      Left e  -> usrError doc e
+      Right v -> do let newmeta = M.fromList $
+                          map (\i -> injectGVal v (asText i,i)) metalist
+                    setVar keyname $ toGVal newmeta
+                    return def
+
+-- injectGVal :: GVal m -> GVal m -> GVal m
+-- injectGVal defv host = case (asDictItems defv, asDictItems host) of
+--   (True,_,_) -> defv
+--   (Just dd,Just hd)->toGVal $ M.unionWith injectGVal (M.fromList dd) (M.fromList hd)
+--   (_,_)    -> host
+
+injectGVal :: GVal m -> (Text, GVal m) -> (Text, GVal m)
+injectGVal defv (i,host) = (,) i $  case (asDictItems defv, asDictItems host) of
+  (Just dd,Nothing) -> toGVal $ M.insertWith (\_ v -> v) "_callback" (toGVal i)
+                       $ M.fromList dd
+  (Just dd,Just hd) -> toGVal $ M.insertWith (\_ v -> v) "_callback" (toGVal i)
+                     $ M.unionWith inject' (M.fromList dd) (M.fromList hd)
+  (_,_)    -> host
+  where
+    inject' defv host = case (asDictItems defv, asDictItems host) of
+      (Just dd,Nothing) -> defv
+      (Just dd,Just hd) ->toGVal $ M.unionWith inject' (M.fromList dd) (M.fromList hd)
+      (_,_)    -> host
 

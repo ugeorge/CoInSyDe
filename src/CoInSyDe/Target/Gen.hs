@@ -20,7 +20,7 @@ import qualified Data.Text as T
 import           CoInSyDe.Core
 import           CoInSyDe.Internal.Ginger
 import           CoInSyDe.Internal.Map
-import           CoInSyDe.Internal.YAML (YSrcCode(..))
+import           CoInSyDe.Internal.YAML (YSrcCode(..), ysrcCode)
 
 
 type CodeGen o l = State (GenState o l)

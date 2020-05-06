@@ -148,11 +148,10 @@ instance ToYAML (Type C) where
   toYAML (Foreign i n iu ou r) = mapping [ "_name" .= n  ]
 
 ifToYAML :: Id -> If C -> Node ()
-ifToYAML i (TPort (Var n k t v) u) = mapping $
+ifToYAML i (TPort (Var n k t v)) = mapping $
   [ "_name" .= n, "_type" .= toYAML t ]  ++
-  [ "_use" .= fromMaybe "{{ _name }}" u ] ++
   maybe [] (\x -> [ "_val" .= x ]) v
-ifToYAML _ (Param n _) = toYAML n
+ifToYAML _ (Param n) = toYAML n
   
 instance ToDoc (Type C) where
   toDoc _ (PrimTy i n) = plain $ code n <> text ": primitive"

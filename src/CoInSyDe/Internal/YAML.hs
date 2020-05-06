@@ -4,10 +4,10 @@ module CoInSyDe.Internal.YAML (
   ToYAML(..),
   YDoc(..), YMap, YNode, YPos, YParse,
   getPos, getLineAndColumn, getChildren, (|=),
-  getAttr, queryNode, (@!), (@?), (@=), (@^),
-  getYDoc, readYDoc, withYDoc, parseYDoc, writeYAML,
+  getAttr, queryNode, (@!), (@?), (@=), (@^), nodeToMap, combineNode,
+  parseYText, readYDoc, withYDoc, parseYDoc, writeYAML,
   yamlError, prettyErr, prettyYNode,
-  YSrcCode(..), ysrcFromText, prettyYSrcWithOffset
+  YSrcCode(..), ysrcCode, ysrcFromText, prettyYSrcWithOffset
   ) where
 
 import           Control.Monad (liftM,when)
@@ -17,11 +17,12 @@ import           Data.ByteString.Char8 as C8 (pack)
 import qualified Data.ByteString.Lazy as S
 import qualified Data.ByteString.Lazy.Char8 as SC (unpack)
 import           Data.Default
+import           Data.Either
 import qualified Data.HashMap.Strict as H
 import qualified Data.Map.Strict as M
 import           Data.Maybe
 import           Data.Scientific (fromFloatDigits)
-import           Data.Text (Text,append)
+import           Data.Text as T (Text,append,lines)
 import           Data.Text.Encoding (encodeUtf8)
 import           GHC.Generics
 -- import qualified Data.Vector as V
@@ -103,6 +104,21 @@ queryNode l n = query' l n >>= maybe (return Nothing) parseYAML
       Mapping{} -> withMap "" (.:? q) n >>= maybe (return Nothing) (queryNode qs)
       _         -> return Nothing
 
+nodeToMap :: Show a => Node a -> Either String (H.HashMap Text (Node a))
+nodeToMap (Mapping _ _ m) =
+  let (err,mp) = partitionEithers $ map checkKey $ M.toList m
+  in case err of
+       [] -> Right $ H.fromList mp
+       e  -> Left $ unlines e
+  where checkKey (Scalar _ (SStr k),v) =  Right (k,v)
+        checkKey (n,_) = Left $ "YAML key " ++ show n
+                         ++ " is not text. Cannot convert to map!\n"
+
+combineNode :: Node () -> Node () -> Node ()
+combineNode m@(Mapping _ _ mm) h@(Mapping _ _ mh) =
+  toYAML $ M.unionWith combineNode mm mh
+combineNode m h = m
+
 
 
 -- getTextPos (Scalar p _) = p
@@ -155,13 +171,11 @@ readYDoc p = S.readFile p >>= handleMeta p >>= \(s,m) ->
     inStyle path inp (pos,msg) = prettyPosWithSource pos inp
       (" YAML parse error in file\n\t+++ " ++ path ++ "\n" ) ++ msg ++ "\n"
 
-getYDoc :: Text -> Either (Pos,String) YDoc
-getYDoc x = liftM (YDoc "" bssrc Nothing ) (decodeNode bssrc >>= getRoot . head)
-  where
-    bssrc = S.fromStrict $ encodeUtf8 x
-    getRoot r = case docRoot r of
-      r@Mapping{} -> Right ("document", r)
-      _ -> Left (Pos (-1) (-1) 0 0, "Document is not a dictionary.")
+parseYText :: Text -> Either String (Node ())
+parseYText x = case (docRoot . head) <$> decodeNode bssrc of
+  Left (pos,err) -> Left $ prettyPosWithSource pos bssrc err
+  Right n -> Right $ toYAML n 
+  where bssrc = S.fromStrict $ encodeUtf8 x
 
 withYDoc :: FilePath -> (YDoc -> a) -> IO a
 withYDoc path f = liftM f (readYDoc path)
@@ -201,23 +215,28 @@ instance Show a => ToGVal m (Node a) where
 
 -----------------------------------------------
 
-data YSrcCode = YSrc { ysrcPath :: FilePath
-                     , ysrcPos  :: Pos
-                     , ysrcCode :: Text
+data YSrcCode = YSrc { ysrcPath  :: FilePath
+                     , ysrcPos   :: Pos
+                     , yPreamble :: Text
+                     , ysrcMain  :: Text
                      } deriving (Show,Generic)
 instance Binary YSrcCode
 
+ysrcCode :: YSrcCode -> Text
+ysrcCode src = yPreamble src <> ysrcMain src
+
 prettyYSrcWithOffset :: YSrcCode -> String -> (Int, Int) -> String
-prettyYSrcWithOffset (YSrc path (Pos _ _ l c) code) msg (offsL,offsC) =
+prettyYSrcWithOffset (YSrc path (Pos _ _ l c) pream code) msg (offsL,offsC) =
   shpath ++ "\n" ++ prettyPosWithSource newpos srcbs msg
   where
     shpath = if null path then "" else show path ++ " (" ++ show (l + offsL) ++ ":"
                                        ++ show (c + offsC) ++ ")\n"
-    newpos = Pos coffs coffs (l + offsL) (offsC + 3)
+    newpos = Pos coffs coffs (l + offsL - hPream) (offsC + 3)
     srcbs  = S.fromStrict $ encodeUtf8 code
     coffs  = let clines = take offsL $ S.split (ch2w '\n') srcbs
              in fromIntegral $ sum $ map S.length clines
     ch2w   = toEnum . fromEnum
+    hPream = Prelude.length $ T.lines pream
 
-ysrcFromText :: Text -> YSrcCode
+ysrcFromText :: Text -> Text -> YSrcCode
 ysrcFromText = YSrc "" (Pos (-1) (-1) 0 0)

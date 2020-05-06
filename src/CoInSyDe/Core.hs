@@ -21,7 +21,7 @@ module CoInSyDe.Core (
   -- * Core Types
   Target(..), Comp(..), If(..), Instance(..), Binding, updateOnBind,
   -- * Core Type Constructors
-  mkNative, mkTemplate, mkPattern, mkBindDict, mkBinding
+  mkNative, mkTemplate, mkPattern, mkBindDict
   ) where
 
 import Control.Arrow ((***))
@@ -89,8 +89,8 @@ deriving instance Target l => Show (Comp l)
 
 -- | Interface
 data If l where
-  Param ::             { ifParam :: YNode, ifUse :: Maybe Text } -> If l
-  TPort :: Target l => { ifPort :: Port l, ifUse :: Maybe Text } -> If l
+  Param ::             { ifParam :: YNode } -> If l
+  TPort :: Target l => { ifPort :: Port l } -> If l
 deriving instance Target l => Show (If l)
 
 -- | Container used for storing a reference to a functional component. 
@@ -103,14 +103,15 @@ instance Binary Instance
 
 type Binding = (Id, Id, Maybe Text)
 
-updateOnBind :: Target l => IfMap l -> [Binding] ->  Either String (IfMap l)
+updateOnBind :: Target l => IfMap l -> [Binding]
+             ->  Either String (Map (If l, Maybe Text))
 updateOnBind ifmap bindings =
   let (errs,nIfs) = partitionEithers $ map update bindings
   in case errs of
     [] -> Right $ M.fromList nIfs
     e  -> Left $ unlines e
   where update (repl,with,usage) =
-          let renew i = (repl, i {ifUse = usage})
+          let renew i = (repl, (i, usage))
           in renew <$> (ifmap !~ with)
 
 ------------- EXIFED DICTIONARY BUILDERS -------------
@@ -153,7 +154,7 @@ mkTemplate path typeLib n = do
   params <- n |= "parameter"   >>= mkParamDict
   templ  <- n @! "code"
   tmpos  <- n @^ "code"
-  return $ TmComp name (ports `union` params) requs M.empty (YSrc path tmpos templ)
+  return $ TmComp name (ports `union` params) requs M.empty (YSrc path tmpos "" templ)
 
 -- | Builds a component dictionaty and load history from all nodes
 --
@@ -180,14 +181,14 @@ mkPortDict tyLib = fmap M.fromList . mapM load
   where load p = do
           name <- p @! "name" 
           port <- mkPort tyLib p
-          return (name, TPort port Nothing)
+          return (name, TPort port)
 
 mkParamDict :: Target l => [YMap] -> YParse (IfMap l)
 mkParamDict = fmap M.fromList . mapM load
   where load p = do
           name <- p @! "name"
           val  <- p @! "value"
-          return (name, Param val Nothing)
+          return (name, Param val)
 
 mkInstDict :: Target l => IfMap l -> [YMap] -> YParse (InstMap, IfMap l)
 mkInstDict parentIfs = fmap (break . unzip) . mapM load 
@@ -211,23 +212,11 @@ mkBindDict place pIfs = fmap ((id *** concat) . unzip) . mapM load . zip [0..]
             (Just with, Nothing) -> do
               _ <- maybe (yamlError n $ "Port or parameter does not exist!")
                    return (pIfs !? with)
-              return ((repl, with, usage),[])
+              return ((repl, with,usage),[])
             (Nothing, Just with) -> do
               let newRef = "__" `append` place `append` pack (show ix)
-              return ((repl, newRef, Nothing), [(newRef, Param with Nothing)])
+              return ((repl, newRef,usage), [(newRef, Param with)])
             _ -> yamlError n "Expected either \"with\" or \"withParam\" in binding!"
-
-mkBinding :: YMap -> YParse Binding
-mkBinding n = do 
-  repl  <- n @! "replace"
-  with  <- n @? "with"
-  withv <- n @? "withParam" :: YParse (Maybe Text)
-  usage <- n @? "usage"
-  case (with ,withv) of
-    (Just with, Nothing) -> return (repl, with, usage)
-    (Nothing, Just with)
-      -> yamlError n "No support for template parameter binding yet!"
-    _ -> yamlError n "Expected either \"with\" or \"withParam\" in binding!"
 
   
 ------------- OTHER INSTANCES -------------
@@ -244,11 +233,11 @@ instance  Target l => Binary (Comp l) where
 
 
 instance Target l => Binary (If l) where
-  put (Param v u) = put (0 :: Word8) >> put v >> put u
-  put (TPort p u) = put (1 :: Word8) >>  put p >> put u
+  put (Param v) = put (0 :: Word8) >> put v
+  put (TPort p) = put (1 :: Word8) >>  put p
   get = getWord8 >>= \tag -> case tag of
-                               0 -> Param <$> get <*> get
-                               1 -> TPort <$> get <*> get
+                               0 -> Param <$> get
+                               1 -> TPort <$> get
 
 -- monster code for Pandoc "pretty documentation"
 
@@ -271,8 +260,8 @@ instance Target l => ToDoc (Comp l) where
       ifList (n,p) = simpleTable [] [[plain $ ibold n <> strong ": ",  toDoc "" p]]
         
 instance Target l => ToDoc (If l) where
-  toDoc _ (Param p _) = toDoc "" p
-  toDoc _ (TPort p _) = toDoc "" p
+  toDoc _ (Param p) = toDoc "" p
+  toDoc _ (TPort p) = toDoc "" p
 
 instance ToDoc YNode where
   toDoc _ = codeBlock . toStrict . decodeUtf8 . encode1    
@@ -297,10 +286,9 @@ formattedBinds :: InstMap -> Map [Blocks]
 formattedBinds = groupAll . map format . foldr flatten [] . M.toList
   where
     flatten (plh, Ref cpid il binds) flist = flist ++
-      map (\(rpl,with,use) -> (plh,cpid,il,rpl,with,use)) binds
-    format (plh,cpid,il,rpl,with,use) =
+      map (\(rpl,with,usage) -> (plh,cpid,il,rpl,with)) binds
+    format (plh,cpid,il,rpl,with) =
       let formInline i = if i then ibold "!" else text ""
       in (with, plain (formInline il <> iparens (code plh) <>  math "\\rightarrow"
-                <> ilink "cp" cpid <> text ":" <> iangles (code rpl))
-                <> plain (maybe (text "") (\u -> text " usage: " <> code u) use) ) 
+                <> ilink "cp" cpid <> text ":" <> iangles (code rpl)) ) 
     groupAll xs = M.fromListWith (++) [ (k, [v]) | (k, v) <- xs ]
