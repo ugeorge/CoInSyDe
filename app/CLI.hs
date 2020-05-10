@@ -14,20 +14,16 @@ import System.Process
 import System.IO
 import Data.Time.Clock (getCurrentTime)
 
-
-import Data.YAML (FromYAML)
-import Data.Binary (Binary)
-import Data.Proxy (Proxy)
-
-
--- import Control.Exception
 import Control.Monad
 import Data.Maybe
-import Text.Pretty.Simple
-import Data.Text (unpack)
--- import Data.List
+import Data.Text (unpack,pack)
 import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Text
+import Data.Version (showVersion)
+import Text.Pretty.Simple
+
+import Paths_coinsyde (version)
+import Text.Pandoc.Definition (pandocTypesVersion)
 
 import CoInSyDe.Internal.Config
 import CoInSyDe.Internal.Docs
@@ -35,9 +31,7 @@ import CoInSyDe.Internal.LibManage
 import CoInSyDe.Internal.Map
 import CoInSyDe.Internal.YAML (YNode)
 
-import CoInSyDe.Target.C.Core (C(..))
-import CoInSyDe.Target.C.Builder
-import CoInSyDe.Target.C.Chain
+import CoInSyDe.Target.C
 
 data CLIConfig = CLIConfig { force   :: Bool
                            , docs    :: Maybe String
@@ -76,7 +70,7 @@ main = do
     
     case head (projTarget conf) of
       "c" -> do
-        (tyLib,cpLib) <- loadLibs C conf reload libLists
+        (tyLib,cpLib) <- loadLibs C gconf conf reload libLists
         when debug $ dbgPrettyLib conf "type" tyLib
         when debug $ dbgPrettyLib conf "pattern" cpLib
 
@@ -115,7 +109,7 @@ dumpLibraryDoc cliconf gconf conf filename title content = do
       jsonFile = projDocs conf </> filename <.> "json"
       docFile  = projDocs conf </> filename <.> format
       pandoc   = makeDoc title (projName conf)
-                 (targetidToText $ projTarget conf) (show time)
+                 (pack $ targetidToString $ projTarget conf) (show time)
                  (coinsydeVersion gconf) (workspaceRoot gconf) content
   writePandocJson jsonFile pandoc
   _ <- createProcess (proc "pandoc" $
@@ -139,92 +133,10 @@ dumpCode gconf conf proj code = do
   withFile (projCode conf </> (unpack $ topModule proj) <.> "c") WriteMode $
     \h -> renderIO h $ layoutPretty defaultLayoutOptions code
 
---   -- check if libraries already loaded
---   let tyObjPathath = objPath cmd </> name cmd <.> target cmd <.> "type" <.> "objdump"
---       cpObjPathath = objPath cmd </> name cmd <.> target cmd <.> "component" <.> "objdump"
---   isTyObj <- doesFileExist tyObjPathath
---   isCpObj <- doesFileExist cpObjPathath
-
---   -- load types and components libraries only if forced/needed
---   (tyLib,cpLib) <- case isTyObj && isCpObj && not (force cmd) of
---     -- if already existing, load previously-built objdumps
---     True  -> do
---       tyObj <- loadLibObj tyObjPathath :: IO (MapH (Type C))
---       cpObj <- loadLibObj cpObjPathath :: IO (MapH (Comp C))
---       return (tyObj,cpObj)
---     -- if not, build libraries and put them in objdumps
---     False -> do
---       (tyLdList,cpLdList) <- buildLoadLists (target cmd) (libs cmd) 
-
---       -- double check the load paths are correct
---       printDebug cmd $ "$COINSYDE_PATH = " ++  show (libs cmd)
---       printDebug cmd $ "** Loading type libs: " ++  show tyLdList
---       printDebug cmd $ "** Loading component libs: " ++  show cpLdList
-
---       tyObj <- loadTypeLibs (infile cmd) tyLdList
---       cpObj <- loadCompLibs tyObj cpLdList
-
---       -- dump the built databases. If debug, then pretty-dump
---       createDirectoryIfMissing True (objPath cmd)
---       (if isDebug cmd then dumpPrettyLibObj else dumpLibObj) tyObjPathath tyObj
---       (if isDebug cmd then dumpPrettyLibObj else dumpLibObj) cpObjPathath cpObj
-        
---       -- return for further use
---       return (tyObj,cpObj)
-      
---   -- finally with all types and template libraries, load the C project
---   (topIds,projDb) <- loadProject tyLib cpLib (infile cmd)
---   printDebug cmd $ "** Found top modules: " ++  show topIds
-
---   let projs   = buildProjStructure projDb topIds
---       dbgPath1 = objPath cmd </> name cmd <.> target cmd <.> "allcomp" <.> "objdump"
---       dbgPath2 = objPath cmd </> name cmd <.> target cmd <.> "project" <.> "objdump"
---   when (isDebug cmd) $ dumpPrettyLibObj dbgPath1 projDb
---   when (isDebug cmd) $ dumpPrettyLibObj dbgPath2 projs
-
---   zipWithM_ (dumpCode cmd) topIds projs
-  
---   return ()
-      
--- isDebug x = case debug x of
---   Left False -> False
---   _ -> True
-
--- initDebug x = when (isDebug x) $ init
---   where
---     init = case debug x of
---       Left False -> error "Impossible!"
---       Left True  -> return ()
---       Right o    -> writeFile o ""
-
--- printDebug x = when (isDebug x) . debugOut
---   where
---     debugOut = case debug x of
---       Left False -> error "Impossible!"
---       Left True  -> putStrLn
---       Right o    -> appendFile o . (++"\n")
-
--- dumpCode x top proj = case outPath x of
---   Nothing -> putDoc $ generateCode (layout x) proj
---   Just d  -> do
---     -- create dump path
---     let dumpPath = d </> name x
---     createDirectoryIfMissing True dumpPath
---     -- try to copy existing declared dependencies
---     forM_ (getDependencies proj) $ \f -> do
---       let depPath = inPath x </> normalise f
---           trgPath = dumpPath </> depPath
---       isDepFile <- doesFileExist depPath
---       when isDepFile $ do
---         createDirectoryIfMissing True (takeDirectory trgPath)
---         copyFile depPath trgPath
---     -- now generate and dump the code
---     withFile (dumpPath </> (drop 4 $ unpack top) <.> "c") WriteMode $
---              \h -> renderIO h $ layoutPretty (layout x) $ generateCode (layout x) proj
-
 data Flag
   = Debug
   | Help
+  | Ver
   | Init
   | New
   | Force
@@ -234,22 +146,30 @@ data Flag
 
 flags =
   [ -- control flags
-    Option ['d'] ["debug"] (NoArg Debug)
-    "Logs debug info and dumps debug object files"
-  , Option ['h'] ["help"]   (NoArg Help)
+    Option ['h'] ["help"]   (NoArg Help)
     "Print this help message"
+  , Option ['v'] ["version"]   (NoArg Ver)
+    "Prints the version of this tool and dependencies."
+  , Option ['d'] ["debug"] (NoArg Debug)
+    "Logs debug info and dumps debug object files"
   , Option [] ["global-init"] (NoArg Init)
-    "Initializes a global configuration file in case one does not exist."
+    "Initializes a global configuration file in case\none does not exist."
   , Option ['n'] ["new"] (NoArg New)
-    "Creates a new workspace structure having the current folder as root."
+    "Creates a new workspace structure having the\ncurrent folder as root."
   , Option ['f'] ["force-load"] (NoArg Force)
-    "Forces parsing libraries even if they can be loaded from dumped objects"
+    "Forces parsing libraries even if they can be\nloaded from dumped objects"
   , Option ['D'] ["docs"] (OptArg (Docs . fromMaybe "") "FORMAT")
-    "Dumps the documentation for current project in given format. Default is html."
+    "Dumps the documentation for current project in\ngiven format. Default is html."
   , Option [] ["pandoc-opt"] (OptArg (DocOpt . fromMaybe "") "OPT")
-    "Dumps the documentation for current project in given format. Default is html."
+    "Additional options passed to Pandoc when\nbuilding documentation."
   ]
-header = "Usage: f2c [options] [projects]"
+header = "Usage: coinsyde [options] [projects]\n\n[projects] need to be defined in the 'coinsyde.yaml' configuration file for the current workspace. If none is specified, all projects are compiled.\n\nOptions:"
+
+printVersion usrdir = "coinsyde-" ++ showVersion version 
+  ++ "\nCoInSyDe -- Code Targeting System Design -- version " ++ showVersion version 
+  ++ "\n(c) 2019-2020 George Ungureanu"
+  ++ "\nUsing 'pandoc-types' version " ++ showVersion pandocTypesVersion
+  ++ "\nDefalt user data directory: " ++ usrdir
 
 parse argv =
   case getOpt Permute flags argv of
@@ -264,8 +184,15 @@ parse argv =
       when (Help `elem` args) $ do
         hPutStrLn stderr (usageInfo header flags)
         exitSuccess
+      when (Ver `elem` args) $ do
+        usrdir <- coinsydeDir
+        hPutStrLn stderr (printVersion usrdir)
+        exitSuccess
       when (Init `elem` args) $ do
         makeDefaultConfig
+        exitSuccess
+      when (New `elem` args) $ do
+        makeWorkspace
         exitSuccess
       return (debug, CLIConfig force docs docopt, projs)
     (_,_,errs) -> do

@@ -38,12 +38,12 @@ import CoInSyDe.Target.C.Core
 
 type ProjBuilder = State Proj
 
--- | Structure for a C project.
+-- | Structure for a C project. Used as state for the 'ProjBuilder' monad.
 data Proj = Proj
   { greeter   :: Text                  -- ^ greeter message
-  , topModule :: Id
-  , callStack :: [(Id,Info)]
-  , namespace :: HashSet Id
+  , topModule :: Id                    -- ^ ID of top module
+  , callStack :: [(Id,Info)]           -- ^ for traceback in case of error thrown
+  , namespace :: HashSet Id            -- ^ for building scoped names
   , funDecls  :: HashSet Id            -- ^ functions that need to be declared
   , includes  :: Map (Vertex,[Vertex]) -- ^ will be dependency graph
   , globVars  :: Map (Port C)          -- ^ set of global variables
@@ -56,20 +56,21 @@ emptyProj top = Proj greet top [] S.empty S.empty M.empty M.empty M.empty M.empt
 
 greet = pack "// Generated with CoInSyDe : Code Synthesizer for System Design //"
 
+-- | Gets a sorted list of include files based on declared inter-dependencies.
 resolveIncludes :: Proj -> [Id]
 resolveIncludes proj = L.map ((\(i,_,_) -> i) . getNode) $ G.topSort graph
   where (graph,getNode,_)  = graphFromEdges $ L.map (\(i,(h,d)) -> (i,h,d))
                              $ M.toList $ includes proj
 
+-- | Gets a list with the IDs of all functions that need to be declared globally.
 getFunDecls :: Proj -> [Id]
 getFunDecls = S.toList . funDecls
 
--- getFunDefs :: Proj -> [Id]
--- getFunDefs proj = filter (=/ topModule proj) $ M.keys $ projComps proj
-
+-- | Gets a list of types that need to be defined.
 getTypeDecls :: Proj -> [Type C]
 getTypeDecls = M.elems . typeDecls
 
+-- | Gets a list of variables that need to be declared globally.
 getGlobVars :: Proj -> [Port C]
 getGlobVars = M.elems . globVars
 

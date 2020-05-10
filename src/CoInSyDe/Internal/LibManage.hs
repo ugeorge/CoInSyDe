@@ -25,7 +25,7 @@
 -- * @\<ext\>@ is an aritrary extension and will not be checked
 --
 -- CoInSyDe libraries for each project in a workspace are pointed out by their
--- configuration files. Check "CoInSyDe.Interna.Config" for more details.
+-- configuration files. Check "CoInSyDe.Internal.Config" for more details.
 --
 -- * the libraries are listed as @stdlib:usrlib1:usrlib2:...@, ranked by a
 -- /earlier is older/ (e.g. stdlib) and /later is newer/ (e.g. usrlib2) policy.
@@ -42,8 +42,7 @@
 -- Libraries are loaded based on their hierarchy on the first run, for each target,
 -- and then are dumped to a @objdump@ file. Each subsequent run will load the
 -- pre-built libraries from that @objdump@, unless forced to rebuild libraries. Due to
--- load-time inter-dependencies (or the lack of them), types and components are loaded
--- in different orders:
+-- load-time inter-dependencies, types and components are loaded in different orders:
 --
 -- * types are loaded from the most generic to the most specialized targets,
 --   over-writing old entries with the same ID.
@@ -52,7 +51,7 @@
 --   entries with the same ID are being kept new ones are ignored.
 ------------------------------------------------------------------------
 module CoInSyDe.Internal.LibManage (
-  buildLoadLists, shouldReloadLib,
+  LibLoadList(..), buildLoadLists, shouldReloadLib,
   loadLibs, loadObj, dumpObj, dbgPrettyLib
   )
 where
@@ -66,15 +65,16 @@ import           System.Directory
 import           System.Exit
 
 import           Control.Exception
-import           Control.Monad (foldM,liftM)
+import           Control.Monad (foldM,liftM,forM,when)
 import           Data.Binary as Bin
 import qualified Data.ByteString.Lazy as BL
 import           Data.Function (on)
 import qualified Data.HashMap.Strict as M
 import           Data.List hiding (union)
-import           Data.Text as T (Text,pack,splitOn)
+import           Data.Text as T (Text,pack,unpack,splitOn)
 import           Data.Text.Lazy.Encoding (encodeUtf8)
 import           Data.Time.Clock
+import           Data.Version
 import           Text.Pretty.Simple
 
 import           CoInSyDe.Core
@@ -96,30 +96,33 @@ buildLoadLists :: SuiteConfig  -- ^ Workspace configuration
 buildLoadLists suite proj = withCurrentDirectory (workspaceRoot suite) $ do
   let target    = projTarget proj
       listDir d = listDirectory d >>= mapM (canonicalizePath . (d </>))
-  tyPaths <- saneCheck target "type"     <$> mapM listDir (typePaths suite)
-  nvPaths <- saneCheck target "native"   <$> mapM listDir (nativePaths suite)
-  tpPaths <- saneCheck target "template" <$> mapM listDir (templatePaths suite)
+  tyPaths <- saneCheck target "type"     <$> mapM walkDir (typePaths suite)
+  nvPaths <- saneCheck target "native"   <$> mapM walkDir (nativePaths suite)
+  tpPaths <- saneCheck target "template" <$> mapM walkDir (templatePaths suite)
   return [ LL "type"     (tyPaths ++ projTypes proj)
          , LL "native"   (reverse $ nvPaths ++ projNative proj)
          , LL "template" (reverse tpPaths)
          , LL "pattern"  (projPatts proj)]
-
+    where walkDir p = traverseDir p $ \filepath ->
+            let fn = takeFileName filepath
+            in any ($fn) [ isPrefixOf ".", isPrefixOf "#", isSuffixOf "#"
+                         , isSuffixOf "~"]
+                                            
 saneCheck :: TargetId -> String -> [[FilePath]] -> [FilePath]
-saneCheck target kind paths | all (checkDup []) sorted = concat sorted
+saneCheck target kind paths --  | all (checkDup []) sorted
+  = concat sorted
   where
-    filtered = map (filter (\p -> visible p && baseNameMatch p && targetMatch p)) paths
+    filtered = map (filter (\p -> baseNameMatch p && targetMatch p)) paths
     sorted   = map (sortBy (compare `on` length . extractTarget)) filtered
     ------------------------------------------------------
     baseNameMatch p = extractBaseName p == ("coinlib-" ++ kind)
     targetMatch   p = extractTarget p `isPrefixOf` target
-    visible       p = not $ any (\f -> f $ takeFileName p)
-                      [ isPrefixOf ".",  isPrefixOf "#", isSuffixOf "~"]
 
-checkDup :: [TargetId] -> [FilePath] -> Bool
-checkDup _ [] = True
-checkDup ts (p:ps)
-  | extractTarget p `elem` ts = error $ "Duplicate target " ++ p
-  | otherwise                 = checkDup (extractTarget p : ts) ps
+-- checkDup :: [TargetId] -> [FilePath] -> Bool
+-- checkDup _ [] = True
+-- checkDup ts (p:ps)
+--   | extractTarget p `elem` ts = error $ "Duplicate target " ++ p
+--   | otherwise                 = checkDup (extractTarget p : ts) ps
 
 -- path/to/coinlib-type.c.ucosii.sem.yaml
 -- + baseName: coinlib-type
@@ -147,11 +150,12 @@ shouldReloadLib proj (LL what srcs) = do
 -- ones with the same ID.
 loadLibs :: Target l
          => l                      -- ^ proxy
+         -> SuiteConfig            -- ^ Suite configuration
          -> ProjConfig             -- ^ Project configuration
          -> [Bool]                 -- ^ see 'shouldReloadLib'
          -> [LibLoadList]          -- ^ See 'buildLoadLists'
          -> IO (MapH (Type l), MapH (Comp l))
-loadLibs _ conf [lty,lnv,ltm,lpt] [tys,nvs,tms,pts] = do
+loadLibs _ gconf conf [lty,lnv,ltm,lpt] [tys,nvs,tms,pts] = do
   tyLib <- if lty
            then parseYDocs makeTyLibs M.empty tys
            else loadObj conf (llWhat tys)
@@ -166,11 +170,24 @@ loadLibs _ conf [lty,lnv,ltm,lpt] [tys,nvs,tms,pts] = do
            else loadObj conf (llWhat pts)
   return (tyLib, nvLib `M.union` ptLib)
   where
-    load parser what l p = readYDoc p >>= \doc -> parseYDoc doc $ parser what l doc
+    load parser what l p = readYDoc p >>= \doc -> case yamlMeta doc of
+      Nothing -> parseYDoc doc $ parser what l doc
+      Just m  -> do docVer <- fromMeta (queryNode["coinsyde-version"]) m
+                    maybe (return ()) (compareVersions p) docVer
+                    parseYDoc doc $ parser what l doc
     parseYDocs parser lib (LL what paths) = do
       nlib <- foldM (load parser what) lib paths
       dumpObj conf what nlib
       return nlib
+    compareVersions p t =
+      let docMajor  = take 2 $ versionBranch $ read (T.unpack t)
+          coinMajor = take 2 $ versionBranch $ coinsydeVersion gconf
+      in do when (docMajor < coinMajor) $ error $
+              "Version mismatch in file " ++ show p ++ ". Please update "
+              ++ "the file to match the API of the current CoInSyDe version"
+            when (docMajor > coinMajor) $ error $
+              "Version mismatch in file " ++ show p ++ ". Consider updating "
+              ++ "your tool to match the specification of the YAML input."
 
 makeTyLibs :: Target l => String -> MapH (Type l) -> YDoc -> YParse (MapH (Type l))
 makeTyLibs what lib doc  = (yamlRoot doc |= pack what) >>= foldM load lib
@@ -199,14 +216,32 @@ mkInfo doc node =  do
   comment <- node @? "comment" @= ""
   return $ Info (yamlPath doc) line column comment
 
+-- | Loads a binary object specified by the @what@ string.
 loadObj :: Binary l => ProjConfig -> String -> IO l
 loadObj conf what = liftM Bin.decode $ BL.readFile (projObjPath what conf) 
 
+-- | Dumps a binary object specified by the @what@ string.
 dumpObj :: Binary l => ProjConfig -> String -> l -> IO ()
 dumpObj conf what = BL.writeFile (projObjPath what conf) . Bin.encode
 
+-- | Dumps a pretty-printed library in a text file for debugging purposes.
 dbgPrettyLib :: Show a => ProjConfig -> String -> a -> IO () 
 dbgPrettyLib conf what
   = BL.writeFile (projObjPath what conf ++ ".dbg") . encodeUtf8
     . pShowOpt defaultOutputOptionsNoColor { outputOptionsIndentAmount = 2 }
 
+-------------------------------------------------------
+
+-- | Traverse from 'top' directory and return all the files by
+-- filtering out the 'exclude' predicate.
+traverseDir :: FilePath -> (FilePath -> Bool) -> IO [FilePath]
+traverseDir top exclude = do
+  ds <- listDirectory top
+  paths <- forM (filter (not . exclude) ds) $ \d -> do
+    let path = top </> d
+    isSymbolic  <- pathIsSymbolicLink path
+    isDirectory <- doesDirectoryExist path
+    if not isSymbolic && isDirectory
+      then traverseDir path exclude
+      else return [path]
+  return (concat paths)

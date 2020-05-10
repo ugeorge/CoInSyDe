@@ -59,6 +59,9 @@ dependencies:
 
 library:
   source-dirs: src
+
+data-files:
+- resource/default.yaml
   
 executables:
   coinsyde:

@@ -1,7 +1,7 @@
 {-# LANGUAGE DeriveGeneric, TypeSynonymInstances, FlexibleInstances #-}
 ----------------------------------------------------------------------
 -- |
--- Module      :  CoInSyDe.Core.Dict
+-- Module      :  CoInSyDe.Internal.Map
 -- Copyright   :  (c) George Ungureanu, 2019
 -- License     :  BSD-style (see the file LICENSE)
 -- 
@@ -17,8 +17,7 @@ module CoInSyDe.Internal.Map (
   Id, Map(..), (!?), (!~),
   -- * History-Bookkeeping Map
   MapH, Info(..), Policy(..), prettyInfo,
-  mkDb, (!*), (!^), mapDb, 
-  dbUpdate, dbUnion
+  mkDb, (!*), (!^), mapDb, dbUpdate
   ) where
 
 import           Data.Binary
@@ -48,9 +47,11 @@ instance Binary v => Binary (Map v) where
 instance ToYAML v => ToYAML (Map v) where
   toYAML = mapping . map (\(k,v) -> k .= toYAML v) . M.toList
 
+-- | Infix selector
 (!?) :: Show t => Map t -> Id -> Maybe t
 (!?) d k =  M.lookup k d
 
+-- | Infix selector with detailed error message
 (!~) :: Show t => Map t -> Id -> Either String t
 (!~) d k =  maybe (Left msg) Right $ M.lookup k d
   where msg = "Key " ++ show k ++ " not found in dictionary with " ++ show (M.keys d)
@@ -65,6 +66,7 @@ data Info = Info { ldFile  :: FilePath
 
 instance Binary Info
 
+prettyInfo :: Info -> String
 prettyInfo (Info f (-1) (-1) _) = f
 prettyInfo (Info f l c _)  = f ++ " (" ++ show l ++ ":" ++ show c ++ ")"
 
@@ -103,15 +105,4 @@ dbUpdate Keep    name c info = M.insertWith fKeep name (c,[info])
 
 fReplace (a,newh) (_,oldh) = (a,newh++oldh)
 fKeep    (_,newh) (a,oldh) = (a,oldh++newh)
-
-dbUnion :: MapH t -> MapH t -> MapH t
-dbUnion = M.unionWithKey err
-  where
-    err k (_,i1) (_,i2) = error $ "Found two components with the same ID " ++ show k
-                          ++ " defined at:\n+++ " ++ prettyInfo (head i1)
-                          ++ "\n+++ " ++ prettyInfo (head i2)
-
-dictErr k d = "ID " ++ show k ++ " does not exist in the database with elements: "
-              ++ (show $ M.keys d)
-              -- ++ (TL.unpack $ pShow d)
 

@@ -21,7 +21,7 @@ module CoInSyDe.Core (
   -- * Core Types
   Target(..), Comp(..), If(..), Instance(..), Binding, updateOnBind,
   -- * Core Type Constructors
-  mkNative, mkTemplate, mkPattern, mkBindDict
+  mkNative, mkTemplate, mkPattern
   ) where
 
 import Control.Arrow ((***))
@@ -48,8 +48,8 @@ type InstMap = Map Instance
 
 ------------- CORE TYPES -------------
 
--- | Class for providing a common API for different target languages, where @l@ is
--- mainly a proxy type.
+-- | Class for providing a common AST for working with different target languages. @l@
+-- is mainly a proxy type, but it defines a type family, as below.
 class ( Show (Port l), ToDoc (Port l), Binary (Port l)
       , Show (Type l), ToDoc (Type l), Binary (Type l)
       , Show (Requ l), ToDoc (Requ l), Binary (Requ l)
@@ -67,7 +67,8 @@ class ( Show (Port l), ToDoc (Port l), Binary (Port l)
   -- | Constructor for requirement type
   mkRequ  :: YMap -> YParse (Requ l)
 
--- | Container for functional components or glue operators
+-- | Container for functional components. See the <#g:3 type constructor functions> to
+-- see how thet are being instantiated.
 data Comp l where
   -- | Template functional. Contains template code managed by CoInSyDe
   TmComp :: Target l =>
@@ -87,9 +88,11 @@ data Comp l where
     } -> Comp l
 deriving instance Target l => Show (Comp l)
 
--- | Interface
+-- | Wrapper for interfaces. 
 data If l where
+  -- | Target-independent parameters (YAML entry).
   Param ::             { ifParam :: YNode } -> If l
+  -- | Target-relevant port.
   TPort :: Target l => { ifPort :: Port l } -> If l
 deriving instance Target l => Show (If l)
 
@@ -101,9 +104,17 @@ data Instance =
       } deriving (Show, Generic)
 instance Binary Instance
 
+-- | Binding between a (callee inerface, caller interface, usage). The third parameter
+-- @usage@ can be a Ginger template defining how the port variable is going to be used
+-- in the context of the calee.
 type Binding = (Id, Id, Maybe Text)
 
-updateOnBind :: Target l => IfMap l -> [Binding]
+-- | Returns a dictionary of interfaces with eventual custom usage template based on a
+-- list of bindings. It returns a safe error message in case any of the binding do not
+-- point to existing interfaces.
+updateOnBind :: Target l
+             => IfMap l   -- ^ caller interface map
+             -> [Binding] -- ^ list of bindings
              ->  Either String (Map (If l, Maybe Text))
 updateOnBind ifmap bindings =
   let (errs,nIfs) = partitionEithers $ map update bindings
@@ -116,13 +127,7 @@ updateOnBind ifmap bindings =
 
 ------------- EXIFED DICTIONARY BUILDERS -------------
 
--- | Builds a component dictionaty and load history from nodes
---
---  > <root>/native[@name=*]CTEXT?
--- 
--- These nodes /might/ contain a @CTEXT@ field with the source code for the native
--- function. If it does not, then a @requirement@ child node pointing to the header
--- where the function is defined is necessary.
+-- | Input parser for native components. __Check source for input syntax.__
 mkNative :: Target l
          => MapH (Type l)   -- ^ (fully-loaded) library of types
          -> YMap            -- ^ @\<root\>@ node
@@ -137,11 +142,8 @@ mkNative typeLib n = do
     yamlError n "Native code or requirement missing!"
   return $ NvComp name (ports `union` params) requs (T.stripEnd <$> code)
    
--- | Builds a component dictionaty and load history from nodes
---
---  > <root>/template[@name=*]CTEXT
--- 
--- The @CTEXT@ needs to be written in a template langiage, see 'TTm'.
+
+-- | Input parser for template components. __Check source for input syntax.__
 mkTemplate :: Target l
            => FilePath
            -> MapH (Type l)   -- ^ (fully-loaded) library of types
@@ -156,9 +158,7 @@ mkTemplate path typeLib n = do
   tmpos  <- n @^ "code"
   return $ TmComp name (ports `union` params) requs M.empty (YSrc path tmpos "" templ)
 
--- | Builds a component dictionaty and load history from all nodes
---
---  > <root>/pattern[@name=*,@type=*]
+-- | Input parser for pattern components. __Check source for input syntax.__
 mkPattern :: Target l
           => MapH (Type l)   -- ^ (fully-loaded) library of types
           -> MapH (Comp l)   -- ^ (fully-loaded) library of templates
@@ -221,6 +221,7 @@ mkBindDict place pIfs = fmap ((id *** concat) . unzip) . mapM load . zip [0..]
   
 ------------- OTHER INSTANCES -------------
 
+-- | can be dumped to binary file
 instance  Target l => Binary (Comp l) where
   put (TmComp n i r f t) = do put (0 :: Word8)
                               put n >> put i >> put r >> put f >> put t
@@ -231,7 +232,7 @@ instance  Target l => Binary (Comp l) where
              0 -> TmComp <$> get <*> get <*> get <*> get <*> get
              1 -> NvComp <$> get <*> get <*> get <*> get
 
-
+-- | can be dumped to binary file
 instance Target l => Binary (If l) where
   put (Param v) = put (0 :: Word8) >> put v
   put (TPort p) = put (1 :: Word8) >>  put p
@@ -239,8 +240,7 @@ instance Target l => Binary (If l) where
                                0 -> Param <$> get
                                1 -> TPort <$> get
 
--- monster code for Pandoc "pretty documentation"
-
+-- | can generate documentation
 instance Target l => ToDoc (Comp l) where
   toDoc _ cp@TmComp{} = definitionList
     [ (text "interfaces:",    map ifList $ M.toList $ cpIfs cp)
@@ -259,13 +259,16 @@ instance Target l => ToDoc (Comp l) where
     where
       ifList (n,p) = simpleTable [] [[plain $ ibold n <> strong ": ",  toDoc "" p]]
         
+-- | can generate documentation
 instance Target l => ToDoc (If l) where
   toDoc _ (Param p) = toDoc "" p
   toDoc _ (TPort p) = toDoc "" p
 
+-- | needed to generate documentation
 instance ToDoc YNode where
   toDoc _ = codeBlock . toStrict . decodeUtf8 . encode1    
 
+-- | can generate documentation
 instance ToDoc l => ToDoc (MapH l) where
   toDoc pref = definitionList . map makedefs . M.toList
     where 

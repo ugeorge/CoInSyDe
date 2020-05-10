@@ -1,9 +1,11 @@
 {-# LANGUAGE FlexibleContexts, OverloadedStrings #-}
 module CoInSyDe.Target.Gen (
-  CodeGen, genCode, genCodeCp, spawnGen,
-  initGenState, getCp, getInfo, layoutOpts,
+  CodeGen, initGenState, genCode, genCodeCp, spawnGen,
+  -- * Monad methods
+  get, getCp, getInfo, layoutOpts,
   pushCallStack, -- popCallStack,
   fromTemplate,
+  -- * Error throwing
   GeneratorException, genError
   ) where
 
@@ -22,38 +24,68 @@ import           CoInSyDe.Internal.Ginger
 import           CoInSyDe.Internal.Map
 import           CoInSyDe.Internal.YAML (YSrcCode(..), ysrcCode)
 
-
+-- | Code generation monad. 
 type CodeGen o l = State (GenState o l)
+
+-- | State for code generation monad
 data GenState opt l = GenState
-  { stage      :: String
-  , debugLog   :: String
-  , callStack  :: [CallInfo]
-  , database   :: MapH (Comp l)
-  , layoutOpts :: opt
+  { stage      :: String        -- ^ where in the compiler chain we are
+  , debugLog   :: String        -- ^ convenience place to write debug messages
+  , callStack  :: [CallInfo]    -- ^ updated with 'pushCallStack'
+  , database   :: MapH (Comp l) -- ^ contains all components loaded in a project.
+  , layoutOpts :: opt           -- ^ pretty-printer layout options.
   } deriving (Show)
 
 data CallInfo = Call { callId :: Id, callInfo :: Info, callLevel :: String }
 instance Show CallInfo where
   show (Call i info lvl) = lvl ++ "+> " ++ show i ++ "[" ++ prettyInfo info ++ "]"
 
+-- | Returns an initial state with a fully loaded component database and a set of
+-- pretty-printer-specific layout options
+initGenState :: MapH (Comp l) -> layoutOpts -> GenState layoutOpts l 
 initGenState = GenState "" "" []
 
+-- | Evaluates a generator monad and returns the result. 
+genCode :: Target l
+        => GenState o l  -- ^ initial state
+        -> String        -- ^ current stage, i.e. where in the compiler chain we are
+        -> CodeGen o l a -- ^ generator
+        -> a 
 genCode st stg f = evalState f (st {stage = stg})
-genCodeCp st stg = spawnGen (st {stage = stg})
+
+-- | Evaluates a generator after calling 'pushCallStack' first.
+spawnGen :: Target l
+         => GenState o l  -- ^ state (usually passed from the caller)
+         -> Id            -- ^ called component ID
+         -> CodeGen o l a -- ^ generator
+         -> a
 spawnGen st i f  = evalState ( pushCallStack i >> f ) st
 
+-- | Same as 'genCode' but also calls 'pushCallStack' first.
+genCodeCp :: Target l
+          => GenState o l  -- ^ (initial) state
+          -> String        -- ^ current stage, i.e. where in the compiler chain we are
+          -> Id            -- ^ called component ID
+          -> CodeGen o l a -- ^ generator
+          -> a 
+genCodeCp st stg = spawnGen (st {stage = stg})
+
+-- | Gets current component in the monad.
 getCp :: Target l => CodeGen o l (Comp l)
 getCp = get >>= \s -> do
   let cpId = callId $ head $ callStack s
   maybe (genError $ "Component " ++ show cpId ++ "not found!")
     return $ database s !* cpId
 
+-- | Gets information about the current component.
 getInfo :: Target l => CodeGen o l [Info]
 getInfo = get >>= \s -> do
   let cpId = callId $ head $ callStack s
   maybe (genError $ "Component " ++ show cpId ++ "not found!")
     return $ database s !^ cpId
 
+-- | Pushes a component ID (and associated information) into the call stack, after
+-- which it becomes the current component of the generator monad. See 'getCp'.
 pushCallStack :: Target l => Id -> CodeGen o l ()
 pushCallStack cpId =  get >>= \s -> do
   let cs = callStack s
@@ -63,12 +95,7 @@ pushCallStack cpId =  get >>= \s -> do
           return $ database s !^ cpId
   modify $ \s -> s {callStack = Call cpId (head info) (newLevel cs) : cs}
 
--- popCallStack :: Target l => a -> CodeGen o l a
--- popCallStack a =
---   modify $ \s -> let (c:cs) = callStack s
---                  in s {callStack = c {callLevel = tail $ callLevel c} : cs}
---   return a
-  
+-- | Logs a certain debug information.
 logDebug :: Target l => String -> CodeGen o l ()
 logDebug msg = do
   st <- get
@@ -79,10 +106,11 @@ logDebug msg = do
 
 ------------------------------------------------------------------
 
--- TODO: format parser error based on YPos
+-- | Evaluates a Ginger template (see "CoInSyDe.Internal.Ginger") in the context of a
+-- generator, and returns the expanded code as text.
 fromTemplate :: Target l
-             => GContext
-             -> YSrcCode
+             => GContext -- ^ Ginger context
+             -> YSrcCode -- ^ Template source stored in YAML node
              -> CodeGen o l T.Text
 fromTemplate context tpl = do
   let template = T.unpack $ ysrcCode tpl
@@ -96,6 +124,8 @@ fromTemplate context tpl = do
 
 ------------------------------------------------------------------
 
+-- | Exception raised by a generator. Causes a program-wide error, but the message is
+-- more meaningful. 
 data GeneratorException 
   = GenError String [CallInfo] String
   | GingerParseError CallInfo  String
@@ -113,7 +143,7 @@ instance Show GeneratorException where
     "Template execution error:\n*  " ++ msg
     ++ "\n\n<showing call stack>\n" ++ L.unlines (reverse $ map show stack)
 
--- only one used outside
+-- | Throw an error at a specific position inside a generator.
 genError :: Target l => String -> CodeGen o l a
 genError msg = get >>= \s -> throw $ GenError (stage s) (callStack s) msg
 

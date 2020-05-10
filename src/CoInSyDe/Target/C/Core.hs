@@ -9,8 +9,8 @@
 -- Stability   :  experimental
 -- Portability :  portable
 --
--- This module contains the core types specific to the family of C-based tagets, and
--- their constructors.
+-- This module contains the core AST types specific to the family of
+-- C-based tagets, and their constructors.
 ----------------------------------------------------------------------
 module CoInSyDe.Target.C.Core where
 
@@ -30,8 +30,8 @@ import CoInSyDe.Internal.Map
 import CoInSyDe.Internal.YAML
 
 -- | Defines the family of C target languages. In particular it defines a set of types
--- (see 'Type C'), a set of interfaces (see 'If C') and a set of requirements (see
--- 'Requ C'), by instantiating the 'Target' type class.
+-- (see 'Type'), a set of interfaces (see 'If') and a set of requirements (see
+-- 'Requ'), by instantiating the 'Target' type class.
 data C = C
 
 data Kind = LocVar | GlobVar | InArg Int | OutArg Int | RetArg
@@ -44,6 +44,7 @@ instance Show Kind where
   show (OutArg _) = "output argument"
   
 -----------------------------------------------------------------
+-- | Becomes part of the CoInSyDe AST
 instance Target C where
   data Type C
     =  PrimTy {tyId :: Id, tyName :: Text} 
@@ -134,16 +135,23 @@ isVoid _            = False
 isGlobal v = pKind v == GlobVar
 
 instance Binary Kind
+-- | can be stored into binary file
 instance Binary (Type C)
+-- | can be stored into binary file
 instance Binary (Port C)
+-- | can be stored into binary file
 instance Binary (Requ C)
 
+-- | void
 instance Default (Type C) where
   def = NoTy "void"
 
+-- | void local variable
 instance Default (Port C) where
   def = Var {pName = "", pKind = LocVar , pTy = def , pVal = Nothing }
 
+-- | For building 'CoInSyDe.Internal.Ginger.GContext' variables.
+-- __Check source for usage syntax!__
 instance ToYAML (Type C) where
   toYAML (PrimTy i n)    = mapping [ "_name" .= n]
   toYAML (EnumTy i n m)  = mapping [ "_name" .= n, "_val" .= map fst m ]
@@ -154,12 +162,15 @@ instance ToYAML (Type C) where
     [ "_name" .= n, "_base" .= toYAML b,  "_size" .= either id (pack . show) s ]
   toYAML (Foreign i n iu ou r) = mapping [ "_name" .= n  ]
 
-ifToYAML :: Id -> If C -> Node ()
-ifToYAML i (TPort (Var n k t v)) = mapping $
-  [ "_name" .= n, "_type" .= toYAML t ]  ++
-  maybe [] (\x -> [ "_val" .= x ]) v
-ifToYAML _ (Param n) = toYAML n
-  
+-- | For building 'CoInSyDe.Internal.Ginger.GContext' variables.
+-- __Check source for usage syntax!__
+instance ToYAML (If C) where
+  toYAML (TPort (Var n k t v)) = mapping $
+    [ "_name" .= n, "_type" .= toYAML t ]  ++
+    maybe [] (\x -> [ "_val" .= x ]) v
+  toYAML (Param n) = toYAML n
+
+-- | can be dumped to Pandoc documentation
 instance ToDoc (Type C) where
   toDoc _ (PrimTy i n) = plain $ code n <> text ": primitive"
   toDoc _ (EnumTy i n m) = definitionList [
@@ -173,10 +184,14 @@ instance ToDoc (Type C) where
   toDoc _ (Foreign i n c b r) = definitionList [
     (code n <> text ": foreign", map (toDoc "") r)]
 
+
+-- | can be dumped to Pandoc documentation
 instance ToDoc (Port C) where
   toDoc _ (Var name kind ty val) = (plain $ code (pack $ show kind))
     <> (plain $ text name <> text ":" <> tylink ty <> code (maybe "" (append "=") val))
 
+
+-- | can be dumped to Pandoc documentation
 instance ToDoc (Requ C) where
   toDoc _ (Include r) = plain $ text "include: " <> code r
 

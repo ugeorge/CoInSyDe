@@ -1,6 +1,28 @@
 {-# LANGUAGE CPP, OverloadedStrings #-}
+----------------------------------------------------------------------
+-- |
+-- Module      :  CoinSyDe.Internal.Config
+-- Copyright   :  (c) George Ungureanu, 2019
+-- License     :  BSD-style (see the file LICENSE)
+-- 
+-- Maintainer  :  ugeorge@kth.se
+-- Stability   :  experimental
+-- Portability :  portable
+--
+-- Methods for reading and setting up global, workspace and project
+-- tool configurations. Most of them relate to setting up paths where
+-- different files are found.
+------------------------------------------------------------------------
 
-module CoInSyDe.Internal.Config where
+module CoInSyDe.Internal.Config (
+  TargetId,
+  stringToTargetid, targetidToString,
+  -- * Configurations
+  SuiteConfig(..), ProjConfig(..),  
+  projObjPath, loadConfig,
+  -- * Utilities
+  coinsydeDir, searchProjRootDir, makeDefaultConfig, makeWorkspace
+  ) where
 
 #ifdef mingw32_HOST_OS
 import System.FilePath.Windows
@@ -10,9 +32,10 @@ import System.FilePath.Posix
 import System.Directory
 import System.Exit
 
-import Paths_coinsyde (version)
+import Paths_coinsyde (version,getDataFileName)
+import Text.Pandoc.Definition (pandocTypesVersion)
 
-import Control.Monad (when)
+import Control.Monad (when,unless)
 import Data.Maybe (fromJust, fromMaybe)
 import Data.Text (Text, splitOn, unpack, pack, intercalate)
 import Data.Version (Version)
@@ -23,14 +46,8 @@ import CoInSyDe.Internal.YAML
 
 type TargetId = [Text]
 
-textToTargetid :: Text -> TargetId
-textToTargetid   = splitOn "."
-
 stringToTargetid :: String -> TargetId
 stringToTargetid = splitOn "." . pack
-
-targetidToText :: TargetId -> Text
-targetidToText   = intercalate "."
 
 targetidToString :: TargetId -> String
 targetidToString = unpack . intercalate "."
@@ -39,7 +56,7 @@ targetidToString = unpack . intercalate "."
 data SuiteConfig
   = SuiteConfig { suiteName       :: String     -- ^ name of workspace
                 , coinsydeVersion :: Version    -- ^ CoInSyDe version
-                -- , schemaVersion   :: Version    -- ^ CoInSyDe load schema version
+                , pandocVersion   :: Version    -- ^ CoInSyDe version
                 , workspaceRoot   :: FilePath   -- ^ workspace root path
                 , templatePaths   :: [FilePath] -- ^ paths to template definitions
                 , typePaths       :: [FilePath] -- ^ paths to type definitions
@@ -78,7 +95,18 @@ loadSuiteConfig root glob curr = mergeConf <$> appRoot (getConf glob) <*> getCon
       temp  <- fmap unpack <$> obj .:? "templatePaths" .!= []
       typ   <- fmap unpack <$> obj .:? "typePaths" .!= []
       natv  <- fmap unpack <$> obj .:? "nativePaths" .!= []
-      return $ SuiteConfig name version root temp typ natv proj trgl dump docs code
+      return $ SuiteConfig { suiteName = name
+                           , coinsydeVersion = version
+                           , pandocVersion = pandocTypesVersion
+                           , workspaceRoot = root
+                           , templatePaths = temp
+                           , typePaths = typ
+                           , nativePaths = natv
+                           , srcsRoot = proj
+                           , targetLibPath = trgl
+                           , objDumpPath = dump
+                           , docsPath = docs
+                           , codePath = code }
     mergeConf glob curr =
       curr { templatePaths = ovExpand (templatePaths glob) (templatePaths curr)
            , typePaths     = ovExpand (typePaths glob) (typePaths curr)
@@ -170,9 +198,11 @@ loadConfig root = do
     projConfs <- loadProjConfigs suiteConf currConf
     return $ Just (suiteConf, projConfs)
 
+-- | User data directory. Global configuration is found here.
 coinsydeDir :: IO FilePath
 coinsydeDir = getAppUserDataDirectory "coinsyde"
 
+-- | Returns the parent directory where a @coinsyde.yaml@ file is found.
 searchProjRootDir :: FilePath -> IO (Maybe FilePath)
 searchProjRootDir path = do
   currpath <- makeAbsolute path
@@ -187,7 +217,7 @@ searchProjRootDir path = do
 
 -----------------------------------------------------------------
 
--- | Makes a default global configuration
+-- | Makes a default global configuration if none is already there. 
 makeDefaultConfig :: IO ()
 makeDefaultConfig = do
   globConfPath   <- (</> "conf.yaml") <$> coinsydeDir
@@ -198,3 +228,16 @@ makeDefaultConfig = do
          ++ globConfPath ++ "' and rerun this command."
     else do makeDefaultDIrectories
             writeYAML globConfPath defaultConfig
+
+-- | Makes a workspace folder structure in the current directory with
+-- a default configuration template.
+makeWorkspace :: IO ()
+makeWorkspace = do
+  globConfPath   <- (</> "conf.yaml") <$> coinsydeDir
+  globConfExists <- doesFileExist $ globConfPath
+  unless globConfExists $ putStrLn "[WARNING] Did not find a global configuration! Consider creatinng one using the command-line tools (see the help menu)."
+  createDirectoryIfMissing False "usrlib"
+  createDirectoryIfMissing False "libs"
+  createDirectoryIfMissing False "proj"
+  defaultconf <- getDataFileName $ "resource" </> "default.yaml"
+  copyFile defaultconf "coinsyde.yaml"

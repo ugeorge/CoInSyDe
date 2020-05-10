@@ -1,7 +1,32 @@
 {-# LANGUAGE FlexibleContexts, OverloadedStrings #-}
+----------------------------------------------------------------------
+-- |
+-- Module      :  CoinSyDe.Internal.Ginger
+-- Copyright   :  (c) George Ungureanu, 2019
+-- License     :  BSD-style (see the file LICENSE)
+-- 
+-- Maintainer  :  ugeorge@kth.se
+-- Stability   :  experimental
+-- Portability :  portable
+--
+-- "Text.Ginger" is the main template expander engine used in
+-- CoInSyDe. This module uses internally a custom writer monad as
+-- environment in which Ginger templates are being evaluated. It
+-- provides an API to create an evaluation context relevant to each
+-- target compilation chain. The actual template evaluation function
+-- is defined in the context of a target generator monad (see
+-- "CoInSyDe.Target.Gen").
+------------------------------------------------------------------------
 module CoInSyDe.Internal.Ginger (
-  GAcc, GContext, mkGingerContext, execG,
-  mkPlaceholderFun, rangeFun, portLookupFun
+  GContext, mkGingerContext, execG,
+  
+  -- * Custom template functions
+  
+  -- | These function make no sense to be used outside this module, but are exported
+  -- for documentation purpose only. These functions expand the built-in
+  -- <https://ginger.tobiasdammers.nl/guide/syntax/filters/ Ginger filters> providing
+  -- some new template functions.
+  mkPlaceholderFun, rangeFun, portLookupFun, existsFun, setMetaFun
   ) where
 
 import           Control.Arrow (second,(&&&))
@@ -40,10 +65,15 @@ type GWriter  = Writer GAcc
 type GRunner  = Run SourcePos GWriter Text
 type GContext = GingerContext SourcePos GWriter Text
 
+-- | Executes the writer monad and returns either an error message or
+-- the accumulated result text.
+execG :: GWriter a -> Either String Text
+execG  = getAccum . execWriter
 tellG  = tell . Acc
 newG x = writer (T.empty, Acc x)
-execG  = getAccum . execWriter
 
+-- | Creates a Ginger context that needs to be passed to a template
+-- evaluator function (see 'CoInSyDe.Target.Gen.fromTemplate').
 mkGingerContext :: YSrcCode      -- ^ the template source structure
                 -> Map (Node ()) -- ^ built YAML dictionary
                 -> (Text -> Map Text -> Either String Text)
@@ -75,10 +105,9 @@ mkGingerContext srcdoc usrDict phFun = makeContextTextExM look write except
     contextDict :: Map (GVal GRunner)
     contextDict =
       M.insert "placeholder" (fromFunction $ mkPlaceholderFun srcdoc phFun) $
-      M.insert "range"       (fromFunction rangeFun) $
+      M.insert "range"       (fromFunction $ rangeFun srcdoc) $
       M.insert "port"        (fromFunction $ portLookupFun srcdoc) $
       M.insert "exists"      (fromFunction $ existsFun srcdoc) $
-      -- M.insert "reeval"      (fromFunction $ reEvalFun srcdoc) $
       M.insert "setdef"      (fromFunction $ setMetaFun srcdoc) $
       M.map toGVal usrDict
 
@@ -93,8 +122,12 @@ usrError srcdoc msg = do
 
 -- TODO: "tell" errors, do not throw them
 
--- | Makes a template placeholder function from a target function @\ id arglist@. This
--- function uses only positional arguments.
+-- | Makes a template placeholder function from a target function @\
+-- id arglist@. This function uses named arguments only. Usage:
+--
+-- > placeholder ("id", key=value, ...)
+--
+-- where @key@ and @value@ are specific to each target chain.
 mkPlaceholderFun :: YSrcCode -> (Text -> Map Text -> Either String Text)
                  -> Function GRunner
 mkPlaceholderFun src f xs = do
@@ -105,33 +138,16 @@ mkPlaceholderFun src f xs = do
   res <- return $ either (Left . (++) msg) Right $ f (asText name) (fmap asText args)
   _ <- liftRun2 newG res
   return def
-
-
--- reEvalFun :: YSrcCode -> Function GRunner
--- reEvalFun _ [] = throwHere $ ArgumentsError (Just "range") "called with no arguments!"
--- reEvalFun doc [_] = usrError doc "No default value set!"
--- reEvalFun  doc ((_,expr):(_,ctxvar):_) = do
---   context    <- gets rsScope
---   let newCtx = case asDictItems ctxvar of
---         Nothing   -> fmap toGVal context
---         Just vars -> M.fromList vars `M.union` fmap toGVal context
---       contextLookup k = maybe (error "!!!!") return $ M.lookup k newCtx
---   let template = T.unpack $ asText expr
---       options  = mkParserOptions (\_ -> return Nothing)
---       errParse = error . formatParserError (Just template)  -- TODO
---   ginger <- either errParse return =<< parseGinger' options template
---   return $ toGVal $ runGinger (makeContextTextM contextLookup (tellG . Right)) ginger
-
   
 -- | Template range function called with @range@. Usage:
 --
 -- > range (from = 0, step = 1, <to>)
 --
--- where @<to>@ is mandatory and needs to be an integer.
-rangeFun :: Function GRunner
-rangeFun [] = throwHere $ ArgumentsError (Just "range") "called with no arguments!"
-rangeFun args = do
-  when (null pArgs) $ throwHere $ ArgumentsError (Just "range") "Range not given!"
+-- where @\<to\>@ is mandatory and needs to be an integer.
+rangeFun :: YSrcCode -> Function GRunner
+rangeFun doc [] = usrError doc "called with no arguments!"
+rangeFun doc args = do
+  when (null pArgs) $ usrError doc "Range not given!"
   from <- flip (maybe (return 0)) (M.lookup "from" nArgs) $
           \x -> maybe (err x " is not an integer!") return (toInt x)
   step <- flip (maybe (return 1)) (M.lookup "range" nArgs) $
@@ -140,19 +156,26 @@ rangeFun args = do
   return $ toGVal ([from, from+step .. to-1] :: [Int])
   where
     (nArgs, pArgs, _) = matchFuncArgs ["from","step"] args
-    err x msg = throwHere $ ArgumentsError (Just "range") $ T.pack (show x ++ msg)
+    err x msg = usrError doc $ show x ++ msg
 
 
--- | Custom lookup function called with @port@, useful whe the lookup key is the
--- result of a prior expression. Usage.
+-- | Custom lookup function called with @port@, which returns a context based on a
+-- string. Useful whe the lookup key is the result of a prior expression. Usage:
 --
--- > port(key)
+-- > port ("key")
 portLookupFun :: YSrcCode -> Function GRunner
 portLookupFun doc [] = usrError doc "Function called with no argument!"
 portLookupFun _ ((_,x):_) = do
   context <- getVar (asText x)
   return $ toGVal context
 
+-- | Tests the existence of a specific context variable without throwing a "key not
+-- found" error, but rather returning a truth statement. Not to be used with complex
+-- queries. If a specific path needs to be tested, it should be used in combination
+-- with the <https://ginger.tobiasdammers.nl/guide/syntax/filters/ eval> Ginger
+-- function.
+--
+-- > exists ("key")
 existsFun :: YSrcCode -> Function GRunner
 existsFun doc [] = usrError doc "Function called with no argument!"
 existsFun _ ((_,x):_) = do
@@ -161,8 +184,28 @@ existsFun _ ((_,x):_) = do
     Nothing -> return $ toGVal False
     _  -> return $ toGVal True
 
-
-
+-- | Sets de default values of a dictionary-like context variable to the ones
+-- specified. Usage:
+--
+-- > setdef ("key", "default-value")
+--
+-- Example:
+--
+-- > {{ setdef("iterate_over","{offset: 0, range: \"{{_type._size}}\"}") }}
+--
+-- If @iterate_over@ is a list, then it uses its list elements as keys:
+--
+-- > BEFORE             AFTER
+-- > iterate_over:      iterate_over:
+-- >   - in1              in1: { offset: 0, range: "{{_type._size}}"}
+-- >   - in2              in2: { offset: 0, range: "{{_type._size}}"}
+-- 
+-- If @iterate_over@ is a dictionary instead, then it "fills in" the empty entries:
+--
+-- > BEFORE                AFTER
+-- > iterate_over:         iterate_over:
+-- >   in1:{ offset: 5 }     in1: { offset: 5, range: "{{_type._size}}"}
+-- >   in2                   in2: { offset: 0, range: "{{_type._size}}"}
 setMetaFun :: YSrcCode -> Function GRunner
 setMetaFun doc []  = usrError doc "Function called with no argument!"
 setMetaFun doc [_] = usrError doc "No default value set!"
