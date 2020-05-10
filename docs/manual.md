@@ -73,11 +73,15 @@ Skimming through a template workspace should be enough to get a hang of how proj
 
 ### Running your first project
 
-CoInSyDe comes with an example workspace containing a toy project which exposes most of the tool's features and usage. For the next step you can remove the `test-workspace` made during the last section, and instead `cd` into the [`examples`](../examples) folder. Please take some time to study it: open the configuration file, project files, libraries, and try to piece together what you find there against the pieces of information in this tutorial.
+CoInSyDe comes with an example workspace containing a toy project called `toy1` which exposes most of the tool's features and usage. For the next step you can remove the `test-workspace` made during the last section, and instead `cd` into the [`examples`](../examples) folder. Please take some time to study it: open the configuration file, project files, libraries, and try to piece together what you find there against the pieces of information in this tutorial.
+
+**OBS:** at this point you should be quite familiar with [YAML](https://yaml.org/spec/1.2/spec.html), which is the main exchange format used in CoInSyDe. If you don't, check out this [quick tutorial](https://learnxinyminutes.com/docs/yaml/) before you proceed.
 
 #### The design
 
-```{.haskell}
+Open the main project input file [`examples/proj/toy1/toy1.yaml`](../examples/proj/toy1/toy1.yaml). At this point it is not very insightful and does not make much sense, but have it opened in a window close-by anyway. This file in fact describes the internals of the _refined_[^1] process network given in the following listing as [ForSyDe-Atom](https://forsyde.github.io/forsyde-atom/) model:
+
+```haskell
 import ForSyDe.Atom.MoC.SDF as SDF
 import ForSyDe.Atom.Skeleton.Vector as V
 
@@ -90,6 +94,23 @@ toySystem = SDF.comb11 10 10 (V.fromVector . mav . V.vector)
 	fred i c = V.farm2ReduceI mulacc 0 i c
 	mulacc acc i1 i2 = acc + i1 * i2
 ```
+This system represents a moving-average (MAV) algorithm applied on chuncks of 10 elements from infinite streams of integers. The streaming behavior is modeled as a combinational synchronous dataflow (SDF)[^2] process, which consumes 10 tokens and produces 10 tokens. The MAV algorithm is described as a composite pattern made of a shift-farm (i.e. _moving_), which incrementally applies a farm-reduce (i.e. _average_) on pairs of chunked input and static coefficient vectors. Plotted, this system would look like in the following picture:
+
+...
+
+(testbench, dut)
+
+**OBS:** As said in the beginning, ForSyDe-Atom, or any ForSyDe model for that matter, is not a mandatory input for CoInSyDe. I merely used this application model for understanding purpose only. Any methodology based on formally-defined (higher-order) compoments is equally appropriate for providing CoInSyDe input descriptions.
+
+[^1]: it is refined because it has been subjected to a series of semantic-preserving transformations in order to reach this form, which is more suitable for implementation towards imperative sequential code. FOr the documented refinement process, check the case study in [_(not published yet)_]().
+
+[^2]: [[Lee and Seshia, 2017, Cha. 6, p. 152--156]](https://ptolemy.berkeley.edu/books/leeseshia/releases/LeeSeshia_DigitalV2_2.pdf)
+
+#### Patterns. Components. Types
+
+#### Bindings
+
+#### Generating code
 
 ## Advanced Topics
 
