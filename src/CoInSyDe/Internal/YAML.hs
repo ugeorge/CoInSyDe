@@ -200,7 +200,7 @@ readYDoc p = S.readFile p >>= handleMeta p >>= \(s,m) ->
   where
     getRoot r = case docRoot r of
       r@Mapping{} -> ("document", r)
-      _ -> error $ " Parse error in\n++++ " ++ p ++ "\nDocument is not a dictionary."
+      r -> error $ " Parse error in\n++++ " ++ p ++ "\nDocument is not a dictionary.\n"
     inStyle path inp (pos,msg) = prettyPosWithSource pos inp
       (" YAML parse error in file\n\t+++ " ++ path ++ "\n" ) ++ msg ++ "\n"
 

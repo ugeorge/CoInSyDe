@@ -1,10 +1,10 @@
 name:                coinsyde
-version:             0.2.1.0
-github:              "githubuser/coinsyde"
+version:             0.2.2.0
+github:              "forsyde/coinsyde"
 license:             BSD3
-author:              "Author name here"
-maintainer:          "example@example.com"
-copyright:           "2019 Author name here"
+author:              "George Ungureanu"
+maintainer:          "ugeorge@kth.se"
+copyright:           "2019-2020 George Ungureanu"
 
 extra-source-files:
 - README.md
@@ -30,7 +30,7 @@ dependencies:
 # data types
 - aeson        #! needed for pandoc-types
 - scientific   #! needed for ginger
-- data-default #! needed for ginger
+- data-default
 - pandoc-types
 - HsYAML
 - text

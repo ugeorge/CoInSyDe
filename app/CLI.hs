@@ -70,11 +70,12 @@ main = do
     
     case head (projTarget conf) of
       "c" -> do
+        createDirectoryIfMissing True (projObj conf)
         (tyLib,cpLib) <- loadLibs C gconf conf reload libLists
         when debug $ dbgPrettyLib conf "type" tyLib
         when debug $ dbgPrettyLib conf "pattern" cpLib
 
-        unless (isNothing $ docs cliconf) $
+        unless (isNothing $ docs cliconf) $ 
           dumpLibraryDoc cliconf gconf conf "Libs" "Loaded Libraries"
           [ ("Types",      toDoc "ty" tyLib)
           , ("Components", toDoc "cp" cpLib) ]
