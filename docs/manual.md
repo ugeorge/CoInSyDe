@@ -118,7 +118,7 @@ Study more closely the file [`toy1.yaml`](../examples/proj/toy1/toy1.yaml). Noti
   * _template functionals_ are components that enable the manipulation and generation of specific system setups as target code. They _need to_ specify target code written in the [Ginger](https://ginger.tobiasdammers.nl/) templating language[^3], which is a markup language that grants access to information stored in a component's interfaces. They _might_ specify a set of interfaces themselves, but mainly for documentation purposes. They are specified as `template` YAML entries.
   * _patterns_ are "wrappers" around template functionals. They do not contain template code themselves, but rather _import_ it from an already-defined template component. However they _need to_ define a valid set of interfaces so that they can be referenced by other components or even reference themselves other components. They are specified as `pattern` YAML entries.
 
-But why do we need so many different components? Well, mainly for practical reasons, since internally they really are just _components_. Without getting too much into detail (see [Advanced Topics](#advanced-topics) for more), here is how a design flow might make use of CoInSyDe:
+But why do we need so many different components? Well, mainly for practical reasons, since internally they really are just _components_. Without getting too much into detail, here is a plausible scenario in which CoInSyDe is being used (see [Advanced Topics](#advanced-topics) for more):
 
 * a number of _platform experts_ would build "correct" libraries of types (for primitive or standard data types), parametrizable template components (for each supported pattern) and native components (usually for API library functions) specific to each target platform. 
 * a _system design flow_ would provide a custom-tailored instantiation of a modeled application, using only supported patterns ("filled in" with the right parameters), custom types (complex or parametric structures with equivalents in the target language), and a set of native components (pre-compiler, extracted or provided by the design flow for each model kernel function). 
@@ -153,21 +153,62 @@ This will generate a set of files in the current workspace under `docs/toy1/`, a
 * it might have other ports and parameters, but that is up to the application to define;
 * it defines a placeholder called `f` with some specific requirements (we will soon get to that).
 
-You can even see the template code, but at this point it is uninteresting. Check also the generated documentation for `sfarm_1`. It matches the definition in [`toy1.yaml`](../examples/proj/toy1/toy1.yaml), but now all ports are linked in a specific manner their bindings, as well as to their types. Take your time and click aroud to figure out how things are connected. When you are ready, proceed to the next section.
+You can even see the template code, but at this point it is uninteresting. Check also the generated documentation for `mav_1`. It matches the definition in [`toy1.yaml`](../examples/proj/toy1/toy1.yaml), but now all ports are linked in a specific manner their bindings, as well as to their types. Take your time and click aroud to figure out how things are connected. When you are ready, proceed to the next section.
 
 [^3]: Ginger is a (subset) dialect of [Jinja2](https://palletsprojects.com/p/jinja/) templating language, so users of Jinja2 will immediately recognize Ginger syntax.
 
-[^4]: if you are really curious about which files are being parsed and loaded, you might pass the "--debug" flag as well.
+[^4]: if you are really curious about which files are being parsed and loaded, you might pass the `--debug` flag as well.
 
 #### Bindings
 
+As hinted in the previous section, the main mechanism components interact with each other is through _reference_, which goes in the following way:
+
+* a `template` defines a (set of) _placeholder(s)_ (or "hook(s)") where other components need to be instantiated (e.g. through function call). 
+* the `pattern` defined by such a template needs to reference another component by its ID, "binding" it to a placeholder. This is done through an association list which "binds" the interfaces of the caller component to the interfaces of the callee component. 
+
+Now we have built all the premises to understand how CoInSyDe defines and views systems: as systematic hierarchical "expansions" of templates and placeholders, where the leaf components are either native components or placeholder-less template components. This way it is capable of effectively implement higher-order mechanisms (e.g. process constructors or skeletons in ForSyDe). Functional compositions between "sibling" components however, can be achieved through means as simple as value passing (e.g. through variables in C, wires in VHDL or Verilog, or other primitive mechanisms), or as complex as through so-called "glue components" (e.g. API calls to network interfaces, custom protocol IP blocks, etc.). Whatever is the case, these decisions of "what", "where" and "when" have been long taken by a previous design flow. CoInSyDe only gets the results of such decisions as its input specification files, and its only concern is to expand the templates and generate meaningful target code. 
+
+Let us go back to our toy example. Open again `toy.yaml` and `Libs.html` side-by-side, and see how different components are being referenced. The input YAML file contains more information, but the generated documentation presents it in a more traceable manner. Some points of interest:
+
+* `mav_1` references `fred_1` and binds it to its placeholder called `f`. Through it it binds some of its ports to those of `fred_1`. E.g. `COEF` is bound through `(f)` to `fred_1` port called `in2`.
+* `fred_1` binds its local variable `_acc` to both the `acc` and `out` ports of the referenced `mulacc` native component.
+* `mav_1` binds its `out1` variable in a peculiar manner: it passes a template to a `usage` entry. For now the template is of little importance (more details are found in section [Template Language](#template-language)), but it has to do with the fact that _inside_ the `FarmReduceI` skeleton the `out1` port is seen as an _array element_, whereas _outside_, from the perspective of the `ShiftFarm` skeleton, it is seen as a _vector_ (see figure above). 
+
+Admittedly, it is rather cumbersome to follow bindings and if they are done correctly.
+Not to worry, CoInSyDe input is meant to be generated by machines, and of course "a machine never makes mistakes", does it :grin:? Until we reach that performance however, we do need to trace bindings and debug them. Fortunately, as you probably have noticed, when invoked with the `--docs` flag, CoInSyDe also has generated a DOT graph. Open/plot it now, e.g. (**@0.2.2.0**):
+
+	$ cd path/to/examples
+	$ coinsyde --docs
+	$ xdot docs/toy1/Graph-main.dot
+
+As you can see, this graph is quite useful to trace if references and bindings are done correctly and to show an overview of the design under test.
+
 #### Generating code
  
+Finally, let us experiment with the main purpose CoInSyDe was built: code generation. If you remember from the configuration file [`coinsyde.yaml`](../examples/coinsyde.yaml), the desired target platform for the `toy1` project is plain (bare-metal) C code. Open the dumped C file from the specified code path `gen/toy1/main.c`. By this time nothing in this file should be of any surprise: the generated artifact simply mirrors the specification from the input files in the [`proj/toy1`](../examples/toy1) folder, where most components are instantiated simply as functions, and called accordingly. Now compile and execute the file, e.g.:
+
+	$ cd gen/toy1/
+	$ gcc main.c
+	$ ./a.out
+	
+No surprises there either. The artifact behaves just like the original application model: it takes 10 values and applies MAV in reverse order of their arrival. 
+
+Notice that in [`toy1.yaml`](../examples/proj/toy1/toy1.yaml) for most of the compontents instances are specified as _not_ inline. Try changing that and see what happens:
+
+* for the `main` function, change the instance to 
+	
 ## Advanced Topics
+
+TBA
 
 ### Library Management
 
+TBA
+
 ### Input Files
+
+TBA
 
 ### Templates Language
 
+TBA

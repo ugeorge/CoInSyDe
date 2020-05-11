@@ -172,7 +172,11 @@ mkPattern tyLib cpLib n = do
   ports     <- n |= "port"        >>= mkPortDict tyLib
   params    <- n |= "parameter"   >>= mkParamDict
   (b,extra) <- n |= "instance"    >>= mkInstDict (ports `union` params)
-  return $ TmComp name (ports `union` params `union` extra) requs b (cpTpl kind)
+  return $ TmComp { cpName = name
+                  , cpIfs  = ports `union` params `union` extra
+                  , cpReqs = cpReqs kind ++ requs
+                  , cpRefs = b
+                  , cpTpl  = cpTpl kind }
                        
 ------------- INTERNAL DICTIONARY BUILDERS -------------
 

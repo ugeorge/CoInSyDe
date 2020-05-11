@@ -1,0 +1,84 @@
+pattern:
+- name: main
+  type: Generic.Composite.Infinite
+  port:
+  - {name: input,  kind: var, type: ArrInt10}
+  - {name: output, kind: var, type: ArrInt10}
+  parameter:
+  - {name: schedule, value: [readio, exec, writeio]}
+  - {name: myformat, value: "\"%d\""} # TEST
+  instance:
+  - placeholder: readio
+    component: IO.Std.ScanfArray
+    inline: true
+    bind:
+    - {replace: _format, withParam: "\"%d\""}
+    - {replace: arg, with: input}
+  - placeholder: writeio
+    component: IO.Std.PrintfArray
+    inline: true
+    bind:
+    - {replace: _format, with: myformat }
+    - {replace: arg, with: output}
+  - placeholder: exec
+    component: mav_1
+    inline: true
+    bind:
+    - {replace: in1, with: input}
+    - {replace: out1, with: output}
+
+- name: mav_1
+  type: Skeleton.ShiftFarm
+  port:
+  - {name: in1,   kind: iarg.1, type: ArrInt10}
+  - {name: out1,  kind: oarg.2, type: ArrInt10}
+  - {name: COEF,  kind: var,  type: ArrInt5, value: "{0,1,3,2,1}"}
+  - {name: _it,   kind: var, type: UInt}
+  - {name: _range, kind: var, type: UInt}
+  parameter:
+  - {name: iterate_over, value: [in1]}
+  instance:
+  - placeholder: f
+    component: fred_1
+    inline: true
+    bind:
+    - replace: in1
+      with: in1
+      usage: "(n) -> concat(n,\"+\",_it._name)"
+    - {replace: in2, with: COEF}
+    - {replace: size1, with: _range}
+    - replace: out1
+      with: out1
+      usage: "(n) -> concat(n,\"[\",_it._name,\"]\")" 
+
+- name: fred_1
+  type: Skeleton.FarmReduce.Init+Fused+ExpSize
+  port:
+  - {name: in1,   kind: iarg.2, type: ArrInt}
+  - {name: in2,   kind: iarg.3, type: ArrInt5}
+  - {name: size1, kind: iarg.4, type: UInt}
+  - {name: out1,  kind: oarg.1, type: Int}
+  - {name: _acc,  kind: var,  type: Int, value: "0"}
+  - {name: _it,   kind: var,  type: UInt}
+  parameter:
+  - name: iterate_over
+    value:
+      in1: {_callback: size1, range: "{{_name}}"}
+      in2:
+  instance:
+  - placeholder: f
+    component: mulacc
+    bind:
+    - replace: in1
+      with: in1
+      usage: "(n) -> concat(\"(\",n,\")[\",_it._name,\"]\")"
+    - replace: in2
+      with: in2
+      usage: "(n) -> concat(n,\"[\",_it._name,\"]\")"
+    - {replace: acc, with: _acc}
+    - {replace: out, with: _acc}
+
+type:
+- {name: ArrInt10, class: array, targetName: int, baseType: Int, size: 10}
+- {name: ArrInt5, class: array, targetName: int, baseType: Int, size: 5}
+- {name: ArrInt, class: array, targetName: int, baseType: Int, size: 10}

@@ -1,0 +1,13 @@
+type:
+  - {name: Int, class: primitive, targetName: int}
+  - {name: Integer, class: primitive, targetName: long long int}
+  - {name: UInt, class: primitive, targetName: unsigned}
+  - {name: UInteger, class: primitive, targetName: unsigned long long}
+  - {name: Float, class: primitive, targetName: float}
+  - {name: Double, class: primitive, targetName: double}
+  - name: Bool
+    class: enum
+    targetName: bool_t
+    parameter:
+      - {name: "false", value: "0"}
+      - {name: "true", value: "1"}

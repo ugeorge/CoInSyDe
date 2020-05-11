@@ -124,12 +124,13 @@ dumpCode gconf conf proj code = do
   createDirectoryIfMissing True (projCode conf)
   -- try to copy existing declared dependencies
   forM_ (resolveIncludes proj) $ \f -> do
-    let depPath = targetLibPath gconf </> normalise (unpack f)
-        trgPath = projCode conf </> depPath
-    isDepFile <- doesFileExist depPath
-    when isDepFile $ do
-      createDirectoryIfMissing True (takeDirectory trgPath)
-      copyFile depPath trgPath
+    let inclf   = unpack f
+        srcpath = targetLibPath gconf </> inclf
+        dstpath = projCode conf </> inclf
+    isInclude <- doesFileExist srcpath
+    when isInclude $ do
+      createDirectoryIfMissing True (takeDirectory dstpath)
+      copyFile srcpath dstpath
   -- dump the code
   withFile (projCode conf </> (unpack $ topModule proj) <.> "c") WriteMode $
     \h -> renderIO h $ layoutPretty defaultLayoutOptions code

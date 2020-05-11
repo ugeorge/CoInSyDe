@@ -1,0 +1,16 @@
+name: test-workspace
+
+targetLibPath: libs
+projRoot:      proj
+templatePaths: [usrlib]
+typePaths:     [usrlib/Type]
+nativePaths:   [usrlib]
+
+projects:
+- name: toy1
+  description: "Test example skeletons and SDF processes to bare metal C."
+  target: c
+  
+  top-modules:  [main]
+  all-defs:     [toy1.yaml]  # contains both patterns and types
+  native-defs:  [synthed.c]
