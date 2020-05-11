@@ -1,0 +1,37 @@
+\documentclass{standalone}
+
+\usepackage[tikz,math]{forsyde}
+\usetikzlibrary{positioning, shapes, calc}
+
+\newcommand{\vecsize}[3][south]{%
+  \node[strike out,minimum height=.3cm,draw] at (#2) {};
+  \node[anchor=#1,inner sep=5pt] at (#2) {#3};
+}
+
+\begin{document}
+\begin{tikzpicture}
+  \basic[primitive] (f1) {mulacc};
+  \cluster[skeleton,f={0}, ni=2, type=farmReduceI, inner xsep=20pt] (fred1) <(f1)> {fred};
+  \cluster[skeleton,f={$\noexpand\mathit{coef}$}, type=shiftFarm, inner xsep=35pt] (sfarm1) <(fred1)> {sfarm};
+  \cluster[composite,inner sep=15pt] (mav) <(sfarm1)> {mav};
+
+  \coordinate[xshift=-1.5cm] (i1) at (sfarm1.west);
+  \coordinate[xshift=1.5cm] (o1) at (sfarm1.east);
+  
+  \draw[v] (sfarm1.west) edge[srcport] (i1) edge[-|-=.4,dstport] (fred1.w2);
+  \draw[v] (sfarm1.east) edge[->] (o1);
+  \draw[v] (sfarm1-f.s1) edge[|-,dstport] (fred1.w1);
+  \draw[s] (f1) edge[<-] (fred1.w1) edge[<-] (fred1.w2) edge[dstport] (fred1.e1);
+  \draw[s] (fred1.e1) edge[dstport] (sfarm1.e1);
+
+  \vecsize{[xshift=-.8cm]sfarm1.west}{$10$}  
+  \vecsize[north]{[xshift=-.7cm]fred1.w2}{$10-i$}
+  \vecsize[west]{[yshift=-1cm]sfarm1-f.s1}{$5$}
+  \vecsize{[xshift=.8cm]sfarm1.east}{$10$}  
+\end{tikzpicture}
+\end{document}
+
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: t
+%%% End:

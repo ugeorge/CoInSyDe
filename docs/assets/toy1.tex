@@ -1,0 +1,23 @@
+\documentclass{standalone}
+
+\usepackage[tikz,math]{forsyde}
+\usetikzlibrary{positioning, shapes}
+
+\begin{document}
+\begin{tikzpicture}[outside/.style={cloud, cloud puffs=13.7, cloud ignores aspect, align=center, draw}]
+  \standard[process,moc=sdf,type=comb,f={$\noexpand\mathtt{mav}$}](p1){toySystem};
+  \resetportinfo{p1}\wpinfo{10}\epinfo{10}
+  \cluster[composite,inner sep=15pt](dut)<(p1)>{DUT};
+
+  \node[outside,xshift=-2cm] (in1) at (p1.west) {Signal\\Source};
+  \node[outside,xshift=2cm] (out1) at (p1.east) {Signal\\Sink};
+  \cluster[composite,inner sep=7pt]<(in1)(out1)(dut)> {TestBench};
+
+  \draw[s] (p1) edge[<-] (in1) edge[->] (out1);
+\end{tikzpicture}
+\end{document}
+
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: t
+%%% End:

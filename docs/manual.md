@@ -94,11 +94,13 @@ toySystem = SDF.comb11 10 10 (V.fromVector . mav . V.vector)
 	fred i c = V.farm2ReduceI mulacc 0 i c
 	mulacc acc i1 i2 = acc + i1 * i2
 ```
-This system represents a moving-average (MAV) algorithm applied on chuncks of 10 elements from infinite streams of integers. The streaming behavior is modeled as a combinational synchronous dataflow (SDF)[^2] process, which consumes 10 tokens and produces 10 tokens. The MAV algorithm is described as a composite pattern made of a shift-farm (i.e. _moving_), which incrementally applies a farm-reduce (i.e. _average_) on pairs of chunked input and static coefficient vectors. Plotted, this system would look like in the following picture:
+This system represents a moving-average (MAV) algorithm applied on chuncks of 10 elements from infinite streams of integers. The streaming behavior is modeled as a combinational synchronous dataflow (SDF)[^2] process, which consumes 10 tokens and produces 10 tokens. The MAV algorithm is described as a composite pattern made of a shift-farm (i.e. _moving_), which incrementally applies a farm-reduce (i.e. _average_) on pairs of chunked input and static coefficient vectors. This system would look like in the following pictures:
 
-...
+![The `toySystem` process and its testbench](assets/toy1.svg)
 
-(testbench, dut)
+![The `mav` vector function as composition of skeletons](assets/toy1-mav.svg)
+
+Notice that the input file [`toy1.yaml`](../examples/proj/toy1/toy1.yaml) describes the _full testbench_ as its top module `main`, not just the design-under-test (DUT) `toySystem`. This means the "somewhere along the design flow" the decision was take so that "clouds" _Signal Source_ and _Signal Sink_ are replace with some appropriate target IO functions (in this case the `scanf`- and `prinft`-based patterns).
 
 **OBS:** As said in the beginning, ForSyDe-Atom, or any ForSyDe model for that matter, is not a mandatory input for CoInSyDe. I merely used this application model for understanding purpose only. Any methodology based on formally-defined (higher-order) compoments is equally appropriate for providing CoInSyDe input descriptions.
 
