@@ -1,5 +1,7 @@
 # coinsyde
 
+**DISCLAIMER: This tool is still highly experimental and is not fit for production nor distribution. It is only published only for historical reasons and it is planned to be deprecated by an improved, redesigned version soon.**
+
 ## User guide
 
 This guide is temporary and is subject to change. Better watch the API for the latest changes.
